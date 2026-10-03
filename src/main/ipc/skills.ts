@@ -19,7 +19,7 @@
 import { dialog } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
-import { dirname } from 'node:path'
+import { dirname, isAbsolute, relative } from 'node:path'
 import type { SkillListItem, SkillMarketItem, SkillInstallScope } from '../../shared/domain/skill'
 import { refreshSkills } from '../runtime'
 import { getEnvironments, getHost, getWorkspaceEnvironment } from '../runtime'
@@ -361,7 +361,11 @@ export async function uninstallSkill(req: { skillId: string; workspaceId?: strin
   }
   const resolved = await fs.realpath(target.sourcePath).catch(() => target.sourcePath as string)
   const root = await fs.realpath(expectedRoot).catch(() => expectedRoot)
-  if (!(resolved === root || resolved.startsWith(root + '/'))) throw new Error('Skill 安装位置无效')
+  // 同 markdown-resource.ts:Windows 上 realpath 返回反斜杠,`root + '/'` 这种
+  // 字符串前缀判断永远为假,合法卸载会被误判 —— 用 path.relative 做跨平台包含判断。
+  // rel === '' 保留原语义:resolved 就是根目录本身时放行。
+  const rel = relative(root, resolved)
+  if (rel !== '' && (rel.startsWith('..') || isAbsolute(rel))) throw new Error('Skill 安装位置无效')
   await fs.rm(resolved, { recursive: true, force: true })
   broadcast()
 }

@@ -10,7 +10,7 @@
  *   而另一份忘了,是这类重复代码最典型的下场。
  */
 import { promises as nodeFs } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { AGENT_NAME_RE } from '../../shared/domain/agent-def'
 import { COMMAND_NAME_RE } from '../../shared/domain/command'
 import { LOCAL_SETTINGS_DIRNAME } from '../../shared/domain/local-settings'
@@ -191,7 +191,14 @@ export async function deleteResource(req: {
   */
   const resolved = await nodeFs.realpath(file).catch(() => file)
   const realRoot = await nodeFs.realpath(root).catch(() => root)
-  if (!resolved.startsWith(realRoot + '/')) throw new Error('文件位置无效')
+  /*
+    ★ 不能用字符串前缀(`realRoot + '/'`)判断:Windows 上 `realpath` 返回反斜杠,
+    正斜杠前缀永远匹配不上,合法的删除会被误判成「文件位置无效」。
+    `path.relative` 才是跨平台的包含判断 —— 在根内时 rel 不带 `..` 也不是绝对路径。
+    `rel === ''` 即 resolved 就是根目录本身,同样要拒:目录不该被当成文件删掉。
+  */
+  const rel = relative(realRoot, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) throw new Error('文件位置无效')
   await nodeFs.rm(resolved, { force: true })
   broadcastResourceChanged(req.kind)
 }

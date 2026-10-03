@@ -98,31 +98,42 @@ export function parseModelSelectionKey(key: string): {
  * 看起来同样自然、却会拼出**「A 家的别名 + B 家的锁」**:候选集返回空,
  * 然后报一条指着 B 的错,而 B 跟这次调用根本没关系,用户无从排查。
  *
- * 三档来源,**越具体的越优先**:
+ * 四档来源,**越具体的越优先**:
  *
  * 1. `declared` —— 这个子代理自己声明的。它是对某一个代理的明确安排,
  *    盖过任何全局默认。
- * 2. `configured` —— 设置页那个「默认子代理」。★ 它排在父亲**前面**才是这一栏
+ * 2. `perRole` —— 设置里「按角色覆盖」的那张表查到这个角色的条目
+ *    (`settings.subagent.modelOverrides[角色名]`)。它比「默认子代理」更具体:
+ *    用户给某一个常用角色单独配模型,正是想让它盖过全局那一栏。
+ * 3. `configured` —— 设置页那个「默认子代理」。★ 它排在父亲**前面**才是这一栏
  *    存在的理由:子代理是拿来跑量的(`perSessionLimit` 默认 4),用户配它就是
  *    为了让那几路别跟着主力模型走。排在父亲后面的话,只有「主力模型也没配」
  *    时才轮得到它 —— 也就是几乎永远不生效。
- * 3. `parent` —— 都没配时沿用父 run,连同它锁的那家。
+ * 4. `parent` —— 都没配时沿用父 run,连同它锁的那家。
  *
  * @param declared `agents/<name>.md` frontmatter 里的那一对。`modelProviderId`
  *   缺席(从 Claude Code 粘过来的文件里**总是**缺席)= 只认别名,按优先级择优,
  *   而**不是**沿用父亲锁的那家 —— 父亲那家未必提供这个别名,拼出来的就是
  *   上面说的「A 家的别名 + B 家的锁」。
+ * @param perRole `settings.subagent.modelOverrides` 里这个角色的条目,经
+ *   `availableSubagentModel` 做过可用性校验(悬空时调用方给 `{ model: '' }`)。
  * @param configured `settings.subagent`。空别名 = 这一栏是「跟随对话」,当作没配。
  *   ★ 调用方有责任先确认它**当前还指得到一条绑定**(供应商被删/别名被改名的
  *   窗口期里它会悬空),否则子代理会拿着一个查不到的别名去发请求。
  */
 export function subagentModelSelection(
   declared: { model?: string; modelProviderId?: string },
+  perRole: { model: string; modelProviderId?: string },
   configured: { model: string; modelProviderId?: string },
   parent: { model: string; modelProviderId?: string }
 ): { model: string; modelProviderId: string | undefined } {
   if (declared.model !== undefined) {
     return { model: declared.model, modelProviderId: declared.modelProviderId }
+  }
+  if (perRole.model.trim() !== '') {
+    // ★ 整对 return,和下面两档一样 —— 拆成两条独立的 `??` 就会拼出
+    //   「A 家的别名 + B 家的锁」,见这个函数的文件级注释。
+    return { model: perRole.model, modelProviderId: perRole.modelProviderId }
   }
   if (configured.model.trim() !== '') {
     return { model: configured.model, modelProviderId: configured.modelProviderId }

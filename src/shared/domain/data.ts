@@ -451,7 +451,10 @@ function isSubagentSettings(value: unknown): boolean {
     (value.thinking === undefined || isSubagentThinking(value.thinking)) &&
     optionalString(value, 'modelProviderId') &&
     isIntegerAtLeast(value.perSessionLimit, 1) &&
-    isIntegerAtLeast(value.globalLimit, 0)
+    isIntegerAtLeast(value.globalLimit, 0) &&
+    // ★ modelOverrides 同样是后加的:缺席(旧导出)放行。在场时只验容器是个对象,
+    //   条目逐个放宽 —— 坏条目由 mergeSettings 丢弃,整块拒绝会让一份旧备份导不进来。
+    (value.modelOverrides === undefined || isRecord(value.modelOverrides))
   )
 }
 

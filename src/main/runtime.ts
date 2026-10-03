@@ -24,7 +24,8 @@ import { minPermission } from '../shared/agent/permission'
 import { DEFAULT_WORKSPACE_SETTINGS } from '../shared/domain/workspace'
 import {
   DEFAULT_UPSTREAM_IDLE_TIMEOUT_SECONDS,
-  isUpstreamIdleTimeoutSeconds
+  isUpstreamIdleTimeoutSeconds,
+  type AppSettings
 } from '../shared/domain/settings'
 import type { ApproveFn } from './kernel/agent-session'
 import { AgentSession } from './kernel/agent-session'
@@ -1692,14 +1693,16 @@ function childRequestFor(
   def: AgentDefinition,
   childRunId: string,
   prompt: string,
+  perRoleModel: { model: string; modelProviderId?: string },
   configuredModel: { model: string; modelProviderId?: string },
   configuredThinking: SubagentThinking
 ): RunRequest {
   /*
-    ★ 别名和供应商必须成对决定 —— 三档来源的优先级连同理由都在
-    `subagentModelSelection` 里。`configuredModel` 已经过可用性校验(见调用点)。
+    ★ 别名和供应商必须成对决定 —— 四档来源的优先级连同理由都在
+    `subagentModelSelection` 里。`perRoleModel` 与 `configuredModel` 都已经过
+    可用性校验(见调用点)。
   */
-  const selection = subagentModelSelection(declaredSubagentModel(def), configuredModel, parentReq)
+  const selection = subagentModelSelection(declaredSubagentModel(def), perRoleModel, configuredModel, parentReq)
   return {
     runId: childRunId,
     /*
@@ -1829,6 +1832,21 @@ function availableSubagentModel(configured: { model: string; modelProviderId?: s
 }
 
 /**
+ * 「设置·按角色」那一档:这个角色在 `settings.subagent.modelOverrides` 里的条目,
+ * 经 `availableSubagentModel` 做同样的 trim / 悬空降级(悬空退 `{ model: '' }`,
+ * 让 `subagentModelSelection` 落到下一档「默认子代理」,理由见它头上的注释)。
+ *
+ * ★ **不按 `def.source.kind === 'builtin'` 设门槛**:用户用同名 `.md` 覆盖内置
+ * 角色之后 kind 会变成 project —— 加了门槛,覆盖文件一出现,这个角色的设置
+ * 覆盖就跟着凭空消失。按名字查表对两种来源一视同仁。
+ */
+function roleModelOverride(def: AgentDefinition, sub: AppSettings['subagent']): { model: string; modelProviderId?: string } {
+  const hit = sub.modelOverrides[def.name]
+  if (hit === undefined) return { model: '' }
+  return availableSubagentModel(hit)
+}
+
+/**
  * `ToolContext.spawnSubagent` 的生产实现 —— 两道闸门 + 排队要名额 + 建 run + 等结果。
  *
  * ★ 并发满了走的是**排队**,不是拒绝(见 `kernel/subagent-queue.ts`)。
@@ -1884,7 +1902,8 @@ function spawnSubagentFor(parent: RunHandle, parentReq: RunRequest, parentSkills
 
     const childRunId = `${parent.runId}:sub:${String(++childSeq)}`
     const childReq = childRequestFor(
-      parentReq, parent, def, childRunId, sub.prompt, availableSubagentModel(configured), configured.thinking
+      parentReq, parent, def, childRunId, sub.prompt,
+      roleModelOverride(def, configured), availableSubagentModel(configured), configured.thinking
     )
 
     /*

@@ -137,9 +137,24 @@ export function renameModel(
     patch.defaultModel = next
     patch.defaultModelProviderId = settings.defaultModelProviderId
   }
+  /*
+    ★ subagent 块的两处改动 —— 上面 `model` 的改名和下面 `modelOverrides` 里命中
+    条目的改名 —— 合并进**同一个** `patch.subagent`:两次赋值会互相覆盖,后写的
+    把先写的整个顶掉。
+  */
+  let subagentRenamePatch: AppSettingsPatch['subagent'] | undefined
   if (renames(settings.subagent.model, settings.subagent.modelProviderId)) {
-    patch.subagent = { model: next, modelProviderId: settings.subagent.modelProviderId }
+    subagentRenamePatch = { model: next, modelProviderId: settings.subagent.modelProviderId }
   }
+  const renamedOverrides = Object.fromEntries(
+    Object.entries(settings.subagent.modelOverrides)
+      .filter(([, entry]) => renames(entry.model, entry.modelProviderId))
+      .map(([role, entry]) => [role, { model: next, modelProviderId: entry.modelProviderId }])
+  )
+  if (Object.keys(renamedOverrides).length > 0) {
+    subagentRenamePatch = { ...subagentRenamePatch, modelOverrides: renamedOverrides }
+  }
+  if (subagentRenamePatch !== undefined) patch.subagent = subagentRenamePatch
   if (renames(settings.permissionReviewerModel, settings.permissionReviewerModelProviderId)) {
     patch.permissionReviewerModel = next
     patch.permissionReviewerModelProviderId = settings.permissionReviewerModelProviderId
@@ -419,10 +434,27 @@ function repointDanglingDefaults(): void {
     patch.defaultModel = fixed.model
     patch.defaultModelProviderId = fixed.modelProviderId
   }
-  // 子代理模型的空串是「跟随主对话」,本来就是合法的,所以悬空时置空即可
+  // 子代理模型的空串是「跟随主对话」,本来就是合法的,所以悬空时置空即可。
+  // ★ modelOverrides 的修复和它合并进**同一个** patch.subagent —— 两次赋值互相覆盖。
+  let subagentPatch: AppSettingsPatch['subagent'] | undefined
   const sub = repairModelSelection(before.subagent.model, before.subagent.modelProviderId,
     aliveBindings, aliveAliases, { model: '', modelProviderId: undefined })
-  if (sub !== undefined) patch.subagent = { model: sub.model, modelProviderId: sub.modelProviderId }
+  if (sub !== undefined) subagentPatch = { model: sub.model, modelProviderId: sub.modelProviderId }
+  /*
+    ★ modelOverrides 的条目同样会悬空(某角色的覆盖正钉在被删的那家上)。同一台
+    `repairModelSelection`,同一套语义:无需修 → 不动;别名还在别处 → 解锁;
+    回退置空 → `mergeSubagentModelOverrides` 会把空条目剪掉,该角色回落到默认子代理。
+  */
+  const repairedOverrides: Record<string, { model: string; modelProviderId?: string }> = {}
+  for (const [role, entry] of Object.entries(before.subagent.modelOverrides)) {
+    const repaired = repairModelSelection(entry.model, entry.modelProviderId,
+      aliveBindings, aliveAliases, { model: '', modelProviderId: undefined })
+    if (repaired !== undefined) repairedOverrides[role] = repaired
+  }
+  if (Object.keys(repairedOverrides).length > 0) {
+    subagentPatch = { ...subagentPatch, modelOverrides: repairedOverrides }
+  }
+  if (subagentPatch !== undefined) patch.subagent = subagentPatch
   /*
     ★ 审核模型以前**根本没被这个函数照顾**,是个存量漏洞:删掉它所属的供应商之后
     它一样悬空,而症状更隐蔽 —— 「为我批准」档位会静默退回人工审批

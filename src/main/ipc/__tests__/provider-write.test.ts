@@ -508,6 +508,59 @@ describe('锁定了供应商的设置项在别名表变动后怎么修', () => {
     })
   })
 
+  it('★ modelOverrides 里钉在被删那家的条目:解锁 / 剪掉,不相干条目一个不动', () => {
+    bothOffer('shared')
+    upsertProvider(draft({ id: 'solo', name: 'solo', baseUrl: 'https://solo.invalid', priority: 3 }))
+    store.putAlias({
+      alias: 'solo-only', providerId: 'solo', upstreamModel: 'solo-only',
+      capabilities: { tools: true, vision: false, thinking: false, caching: false },
+      contextWindow: 1000, maxOutputTokens: 100
+    })
+    store.updateSettings({
+      subagent: {
+        modelOverrides: {
+          // 钉在 solo 上且别名随它消失 → 回退置空 → 合并时把这个键剪掉
+          'code-analyst': { model: 'solo-only', modelProviderId: 'solo' },
+          // 钉在 codex 上,但 shared 在 routin 还有 → 只解锁,不改名不换家
+          'code-reviewer': { model: 'shared', modelProviderId: 'codex' },
+          // 和被删的供应商无关 → 原样
+          'code-editor': { model: 'shared', modelProviderId: 'routin' }
+        }
+      }
+    })
+
+    removeProvider('solo')
+    removeProvider('codex')
+
+    const after = store.getSettings()
+    expect(after.subagent.modelOverrides).toEqual({
+      'code-reviewer': { model: 'shared', modelProviderId: undefined },
+      'code-editor': { model: 'shared', modelProviderId: 'routin' }
+    })
+  })
+
+  it('★ 改名:modelOverrides 里命中改名的条目跟着改,不相干条目不动', () => {
+    bothOffer('shared')
+    store.updateSettings({
+      subagent: {
+        modelOverrides: {
+          'code-analyst': { model: 'shared', modelProviderId: 'codex' },
+          'code-reviewer': { model: 'shared', modelProviderId: 'routin' },
+          'code-editor': { model: 'other', modelProviderId: 'routin' }
+        }
+      }
+    })
+
+    renameModel('codex', 'shared', 'shared-v2')
+
+    const after = store.getSettings()
+    expect(after.subagent.modelOverrides).toEqual({
+      'code-analyst': { model: 'shared-v2', modelProviderId: 'codex' },
+      'code-reviewer': { model: 'shared', modelProviderId: 'routin' },
+      'code-editor': { model: 'other', modelProviderId: 'routin' }
+    })
+  })
+
   it('改名:目标判定模型锁定的正是这一家时无条件跟着改', () => {
     bothOffer('shared')
     store.updateSettings({ goalEvaluatorModel: 'shared', goalEvaluatorModelProviderId: 'codex' })

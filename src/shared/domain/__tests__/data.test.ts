@@ -191,6 +191,34 @@ describe('isDataExport', () => {
     expect(isDataExport(badMode)).toBe(false)
   })
 
+  /**
+   * `subagent.modelOverrides`(设置·按角色)是后加的:改动**之前**导出的备份里
+   * 都没有它。整块缺席必须放行;带了就只验容器是个对象 —— 坏条目由 merger
+   * 逐条丢弃,在这里整块拒绝的话,用户看到的只是一句「文件格式不对」。
+   */
+  it('接受缺少 modelOverrides 的旧存档,坏条目放行交 merger 丢弃,容器类型不对仍然拒绝', () => {
+    const settingsOf = (e: Record<string, unknown>): Record<string, unknown> =>
+      e.settings as Record<string, unknown>
+
+    const legacy = minimalExport()
+    const subagent = settingsOf(legacy).subagent as Record<string, unknown>
+    delete subagent.modelOverrides
+    expect(isDataExport(legacy)).toBe(true)
+
+    const sloppy = minimalExport()
+    settingsOf(sloppy).subagent = {
+      model: '', perSessionLimit: 4, globalLimit: 4,
+      modelOverrides: { 'code-analyst': 'garbage', 'code-reviewer': { model: 42 } }
+    }
+    expect(isDataExport(sloppy)).toBe(true)
+
+    const wrongType = minimalExport()
+    settingsOf(wrongType).subagent = {
+      model: '', perSessionLimit: 4, globalLimit: 4, modelOverrides: 'nope'
+    }
+    expect(isDataExport(wrongType)).toBe(false)
+  })
+
   it('带了但类型不对的一律拒掉,而不是存进去等以后炸', () => {
     const bad = minimalExport()
     ;(bad.settings as Record<string, unknown>).defaultModelProviderId = 123

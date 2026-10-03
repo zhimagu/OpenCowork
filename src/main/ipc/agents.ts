@@ -42,8 +42,12 @@ export async function listAgents(req: { workspaceId?: string }): Promise<AgentLi
     source: a.source.kind === 'builtin' ? '' : a.source.path,
     ...(a.tools !== undefined ? { tools: [...a.tools] } : {}),
     ...(a.model !== undefined ? { model: a.model } : {}),
+    ...(a.modelProviderId !== undefined ? { modelProviderId: a.modelProviderId } : {}),
     ...(a.permissionMode !== undefined ? { permissionMode: a.permissionMode } : {}),
     ...(a.color !== undefined ? { color: a.color } : {}),
+    // ★ 正文只对内置下发:用户自己的角色有源文件,编辑器会按需读,不必让每次
+    //   列表都拖着一堆正文。
+    ...(a.source.kind === 'builtin' ? { prompt: a.prompt } : {}),
     enabled: !disabled.has(a.name)
   }))
 }

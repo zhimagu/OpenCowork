@@ -3,6 +3,7 @@
  */
 import type { PermissionMode } from '../agent/permission'
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../agent/run-request'
+import { AGENT_NAME_RE } from './agent-def'
 import { isOpenTargetPreference } from './open-target'
 import type { ProxySettings } from './proxy'
 import { DEFAULT_PROXY, migrateLegacyProxy } from './proxy'
@@ -245,6 +246,43 @@ function mergePersonalization(
 }
 
 /**
+ * `subagent.modelOverrides` 的合并:**按 key 合并**,patch 里没出现的角色原样保留
+ * (连续给两个角色配 patch 不能互相冲掉)。条目级规则:
+ *
+ * - ★ 每个条目内部**成对写**:只给 `model` 时把旧的 `modelProviderId` 清掉 ——
+ *   和上面 `subagent.model` 那条是同一个 bug 的同一半,见 `model-selection.ts` 文件头。
+ * - `model.trim() === ''` 的条目**剪掉**(那个键从盘上消失,不是留一个死条目)。
+ * - 坏形状条目(非对象 / `model` 非字符串)逐条丢弃、其余照常:一个角色的垃圾
+ *   不该让整个覆盖表作废,也不该冲掉那个角色已有的有效配置。
+ */
+function mergeSubagentModelOverrides(
+  current: AppSettings['subagent']['modelOverrides'],
+  patch: unknown
+): AppSettings['subagent']['modelOverrides'] {
+  const merged: AppSettings['subagent']['modelOverrides'] = { ...current }
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) return merged
+  for (const [role, entry] of Object.entries(patch as Record<string, unknown>)) {
+    // ★ role 是用户可控的字符串:`__proto__` 直接赋值会触发 setter 改原型,
+    //   `constructor` / `prototype` 同为危险键(注意这仨里后两个**过得了**下面的
+    //   名字正则,所以必须显式跳过)。角色名再过一遍与加载器一致的 AGENT_NAME_RE。
+    if (role === '__proto__' || role === 'constructor' || role === 'prototype') continue
+    if (!AGENT_NAME_RE.test(role)) continue
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+    const value = entry as Record<string, unknown>
+    if (typeof value.model !== 'string') continue
+    if (value.model.trim() === '') {
+      delete merged[role]
+      continue
+    }
+    merged[role] = {
+      model: value.model,
+      modelProviderId: typeof value.modelProviderId === 'string' ? value.modelProviderId : undefined
+    }
+  }
+  return merged
+}
+
+/**
  * 模型自提目标的三档。★ 它管的是「要不要弹审批」,所以坏值不许落库:
  * 落到 `'disabled'` 会让用户凭空失去一个功能,落到 `'auto'` 则是**静默放宽同意**。
  */
@@ -406,6 +444,18 @@ export interface AppSettings {
     perSessionLimit: number
     /** 全局子代理池,对应界面「并发上限 0–10」 */
     globalLimit: number
+    /**
+     * 设置 › 「按角色覆盖子代理模型」,键是角色名(`general-purpose` 等)。
+     *
+     * ★ 这是「设置·按角色」档,插在 `.md 声明` 与「默认子代理」之间:
+     *   `.md 文件声明 > 这张表 > 设置·默认子代理 > 父 run`。给某个常用角色单独
+     *   配便宜模型,而不动其它角色的默认,正是这一层存在的理由。
+     *
+     * ★ 每个条目的 `(model, modelProviderId)` 与上面的 `model` 同一条规矩:
+     *   **成对决定**(见 `model-selection.ts` 文件头) —— 合并时只给 `model`
+     *   必须把旧锁清掉,否则拼出「A 家别名 + B 家锁」。
+     */
+    modelOverrides: Record<string, { model: string; modelProviderId?: string }>
   }
 
   /** 本地模型网关 —— ★ 默认关闭(方案 §5.4 第 1 条) */
@@ -522,7 +572,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultOpenTarget: '',
   // 思考档位出厂「跟随本轮对话」—— 这正是引入这一栏之前的行为,老用户升级后
   // 子代理的档位一个字都不变(见 `subagent-thinking.ts`)。
-  subagent: { model: '', thinking: INHERIT_THINKING, perSessionLimit: 4, globalLimit: 4 },
+  subagent: { model: '', thinking: INHERIT_THINKING, perSessionLimit: 4, globalLimit: 4, modelOverrides: {} },
   gateway: { enabled: false, preferredPort: 19836, failover: false },
   providerAccountRotation: true,
   notifications: { taskComplete: true, permissionApproval: true, planApproval: true },
@@ -649,7 +699,9 @@ export function mergeSettings(current: AppSettings, patch: AppSettingsPatch): Ap
     }
   }
   if (patch.subagent !== undefined) {
-    next.subagent = { ...next.subagent, ...patch.subagent }
+    // modelOverrides 要**按 key 合并**,先于下面的 spread 算(spread 会把它整体替换掉)
+    const modelOverrides = mergeSubagentModelOverrides(next.subagent.modelOverrides, patch.subagent.modelOverrides)
+    next.subagent = { ...next.subagent, ...patch.subagent, modelOverrides }
     // ★ 这一行是那条「成对写」规则在**浅合并**下的补丁:上面的 spread 只覆盖
     //   patch 里出现过的键,于是只给 `model` 时旧的 `modelProviderId` 会原样留下。
     if (patch.subagent.model !== undefined) next.subagent.modelProviderId = patch.subagent.modelProviderId

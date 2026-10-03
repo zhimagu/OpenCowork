@@ -67,7 +67,14 @@ export interface AgentListItem {
   source: string
   tools?: string[]
   model?: string
+  /** 钉死走哪家供应商,与 `model` 成对(见 `agent-def.ts` 的 `modelProviderId`)。 */
+  modelProviderId?: string
   permissionMode?: string
+  /**
+   * 角色提示词。**只对内置角色下发** —— 用户自己的角色有源文件,编辑器走
+   * `getResource` 自己读,不必让每次列表都拖着正文(理由见 `ipc/agents.ts`)。
+   */
+  prompt?: string
   /** 列表行前面那个小圆点。纯装饰,见 `agent-def.ts` 的 `AgentColor`。 */
   color?: string
   /**

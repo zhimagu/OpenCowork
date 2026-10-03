@@ -85,47 +85,80 @@ describe('子代理选模型', () => {
   const parent = { model: 'gpt-5.6-sol', modelProviderId: 'codex' }
   const none = { model: '' }
 
-  it('三档都空不下来时连供应商一起继承父亲', () => {
-    expect(subagentModelSelection({}, none, parent))
+  it('四档全空不下来时连供应商一起继承父亲', () => {
+    expect(subagentModelSelection({}, none, none, parent))
       .toEqual({ model: 'gpt-5.6-sol', modelProviderId: 'codex' })
   })
 
   it('★ 只声明了别名时供应商必须是「没指定」,不能沿用父亲那家', () => {
     // 从 CC 粘过来的文件就是这个形状(只有 `model:`)。沿用父亲的锁会拼出
     // 「A 家的别名 + B 家的锁」,候选集为空,报错还指着一个跟这次调用无关的供应商。
-    expect(subagentModelSelection({ model: 'claude-fable-5' }, none, parent))
+    expect(subagentModelSelection({ model: 'claude-fable-5' }, none, none, parent))
       .toEqual({ model: 'claude-fable-5', modelProviderId: undefined })
   })
 
   it('子代理自己钉了供应商时那一对原样生效', () => {
-    expect(subagentModelSelection({ model: 'claude-fable-5', modelProviderId: 'routin' }, none, parent))
+    expect(subagentModelSelection({ model: 'claude-fable-5', modelProviderId: 'routin' }, none, none, parent))
       .toEqual({ model: 'claude-fable-5', modelProviderId: 'routin' })
   })
 
   it('父亲没锁时不凭空多出一个锁', () => {
-    expect(subagentModelSelection({}, none, { model: 'gpt-5.5' }))
+    expect(subagentModelSelection({}, none, none, { model: 'gpt-5.5' }))
       .toEqual({ model: 'gpt-5.5', modelProviderId: undefined })
   })
 
   it('★★ 设置里配了「默认子代理」时它盖过父亲 —— 这一栏就是为了别跟着主力模型走', () => {
-    expect(subagentModelSelection({}, { model: 'deepseek-v4-flash', modelProviderId: 'routin' }, parent))
+    expect(subagentModelSelection({}, none, { model: 'deepseek-v4-flash', modelProviderId: 'routin' }, parent))
       .toEqual({ model: 'deepseek-v4-flash', modelProviderId: 'routin' })
   })
 
   it('设置里的别名和供应商成对生效,不会拼出「配置的别名 + 父亲的锁」', () => {
-    expect(subagentModelSelection({}, { model: 'deepseek-v4-flash' }, parent))
+    expect(subagentModelSelection({}, none, { model: 'deepseek-v4-flash' }, parent))
       .toEqual({ model: 'deepseek-v4-flash', modelProviderId: undefined })
   })
 
-  it('子代理自己声明的别名盖过设置 —— 越具体的越优先', () => {
+  it('子代理自己声明的别名盖过按角色/设置那两档 —— 越具体的越优先', () => {
     expect(
-      subagentModelSelection({ model: 'claude-fable-5' }, { model: 'deepseek-v4-flash', modelProviderId: 'routin' }, parent)
+      subagentModelSelection(
+        { model: 'claude-fable-5' },
+        { model: 'role-model', modelProviderId: 'routin' },
+        { model: 'deepseek-v4-flash', modelProviderId: 'routin' },
+        parent
+      )
     ).toEqual({ model: 'claude-fable-5', modelProviderId: undefined })
   })
 
   it('设置里是空白串时当作没配,而不是拿一个空别名去发请求', () => {
-    expect(subagentModelSelection({}, { model: '  ' }, parent))
+    expect(subagentModelSelection({}, none, { model: '  ' }, parent))
       .toEqual({ model: 'gpt-5.6-sol', modelProviderId: 'codex' })
+  })
+
+  it('★ 「设置·按角色」盖过「默认子代理」和父 run', () => {
+    expect(
+      subagentModelSelection(
+        {},
+        { model: 'role-model', modelProviderId: 'routin' },
+        { model: 'deepseek-v4-flash', modelProviderId: 'codex' },
+        parent
+      )
+    ).toEqual({ model: 'role-model', modelProviderId: 'routin' })
+  })
+
+  it('★★ 按角色只给别名时供应商必须是「没指定」—— 不拼「角色的别名 + 默认那家的锁」', () => {
+    expect(
+      subagentModelSelection(
+        {},
+        { model: 'role-model' },
+        { model: 'deepseek-v4-flash', modelProviderId: 'codex' },
+        parent
+      )
+    ).toEqual({ model: 'role-model', modelProviderId: undefined })
+  })
+
+  it('按角色是空白串时当作没配,落到「默认子代理」', () => {
+    expect(
+      subagentModelSelection({}, { model: '   ' }, { model: 'deepseek-v4-flash', modelProviderId: 'routin' }, parent)
+    ).toEqual({ model: 'deepseek-v4-flash', modelProviderId: 'routin' })
   })
 })
 

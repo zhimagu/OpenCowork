@@ -638,6 +638,10 @@ const ZH: Messages = {
     "一段对话里最多同时运行几个子代理（方案 §4.9）。超出的排队等空位，不会失败。",
   "general.globalSubagentsHint":
     "全应用同时运行的子代理数上限，超出的排队等待。0 = 不允许派子代理。",
+  "general.subagentRoleDesc.general-purpose": "通用助手：搜代码、处理多步任务",
+  "general.subagentRoleDesc.code-analyst": "读代码、解释运作机制",
+  "general.subagentRoleDesc.code-reviewer": "审查新写的代码，找 bug 与风格问题",
+  "general.subagentRoleDesc.code-editor": "执行已定死的机械改动",
   "permission.ask": "询问批准",
   "permission.auto": "为我批准",
   "permission.full": "完全访问",
@@ -2615,6 +2619,10 @@ const EN: Messages = {
     "How many subagents one conversation may have running at the same time (plan §4.9). Dispatches beyond that wait in a queue instead of failing.",
   "general.globalSubagentsHint":
     "How many subagents may run at the same time across the whole app; the rest queue up. 0 disables subagent dispatch.",
+  "general.subagentRoleDesc.general-purpose": "General helper: code search, multi-step tasks",
+  "general.subagentRoleDesc.code-analyst": "Reads code and explains how it works",
+  "general.subagentRoleDesc.code-reviewer": "Reviews new code for bugs and conventions",
+  "general.subagentRoleDesc.code-editor": "Executes already-decided mechanical changes",
   "permission.ask": "Ask for approval",
   "permission.auto": "Approve for me",
   "permission.full": "Full access",

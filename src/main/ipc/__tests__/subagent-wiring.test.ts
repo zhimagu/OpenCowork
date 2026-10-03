@@ -283,7 +283,21 @@ beforeEach(() => {
     `ensureSeeded()` 就是为「先把种子跑完」准备的那个入口。
   */
   ensureSeeded()
-  store.updateSettings({ subagent: { model: '', modelProviderId: undefined, thinking: 'inherit' } })
+  /*
+    ★ 设置跨用例共享 store(subagent 三档字段同样要清,否则上一条用例的配置
+    会把断言「继承/默认」的用例带偏)。modelOverrides 是**按 key 合并**的,
+    空 patch 碰不到已有条目 —— 清空只能走它的剪键路径:把每个已有条目写成
+    空 model(`mergeSettings` 会把 trim 后为空的条目删掉)。
+  */
+  const staleOverrides = store.getSettings().subagent.modelOverrides
+  store.updateSettings({
+    subagent: {
+      model: '',
+      modelProviderId: undefined,
+      thinking: 'inherit',
+      modelOverrides: Object.fromEntries(Object.keys(staleOverrides).map((role) => [role, { model: '' }]))
+    }
+  })
 })
 
 afterEach(() => {
@@ -554,6 +568,34 @@ describe('子代理继承模型时的别名/供应商配对', () => {
     await waitForEnd(r.runId)
 
     expect(seen[0]).toMatchObject({ model: DEMO_ALIAS, modelProviderId: DEMO_PROVIDER_ID })
+  })
+
+  /**
+   * ★★ 「设置·按角色」(`subagent.modelOverrides`)真的会落到子 run 上 ——
+   * 而且它排在「默认子代理」前面:给**某一个**内置角色单独写的条目,盖过全局
+   * 那一栏。没有这条接线用例的话,表能存、能合,而 `childRequestFor` 不读它,
+   * 症状与当年「默认子代理是死配置」一模一样。
+   *
+   * ★ 两个档位都必须是**真的能解析到**的别名:「默认子代理」那档若用悬空别名,
+   * perRole 与 configured 顺序写反时它会落到父 run(DEMO_ALIAS),用例照样绿 ——
+   * 判别力就没了。configured 用 DEMO_ALIAS 后,顺序反了子 run 拿到的是
+   * DEMO_ALIAS 而不是 SUB_ALIAS,断言当场红。
+   */
+  it('★ modelOverrides 里给内置角色配的模型落到子 run 上,盖过「默认子代理」', async () => {
+    store.putAlias({ ...DEMO_ALIASES[0]!, alias: SUB_ALIAS })
+    store.updateSettings({
+      subagent: {
+        model: DEMO_ALIAS,
+        modelOverrides: { 'general-purpose': { model: SUB_ALIAS, modelProviderId: DEMO_PROVIDER_ID } }
+      }
+    })
+    const seen = captureChildReq()
+    const r = req({ modelProviderId: DEMO_PROVIDER_ID })
+
+    startRun(r, fakeWindow().ctx)
+    await waitForEnd(r.runId)
+
+    expect(seen[0]).toMatchObject({ model: SUB_ALIAS, modelProviderId: DEMO_PROVIDER_ID })
   })
 })
 

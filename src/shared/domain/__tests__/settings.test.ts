@@ -81,7 +81,9 @@ describe('mergeSettings', () => {
       subagent: { globalLimit: 8 },
       proxy: { host: '127.0.0.1', port: 7890 }
     })
-    expect(s.subagent).toEqual({ model: '', thinking: 'inherit', perSessionLimit: 4, globalLimit: 8 })
+    expect(s.subagent).toEqual({
+      model: '', thinking: 'inherit', perSessionLimit: 4, globalLimit: 8, modelOverrides: {}
+    })
     // 只给了两段,另外六段是缺省值 —— 这一条钉的就是「兄弟属性还在」
     expect(s.proxy).toEqual({
       ...DEFAULT_PROXY,
@@ -364,6 +366,94 @@ describe('mergeSettings 的模型配对', () => {
     expect(next.permissionReviewerModelProviderId).toBe('codex')
     expect(next.goalEvaluatorModelProviderId).toBe('codex')
     expect(next.compactModelProviderId).toBe('codex')
+  })
+})
+
+/**
+ * 「设置·按角色」的覆盖表(`subagent.modelOverrides`)。
+ * 合并必须**按 key**,条目内部**成对**,空条目剪掉,坏条目逐条丢 ——
+ * 四条各挡一种真实回归,少一条对应的退化就全绿。
+ */
+describe('mergeSettings · subagent.modelOverrides', () => {
+  it('默认是空表;旧库整块缺席时补成 {}', () => {
+    expect(DEFAULT_SETTINGS.subagent.modelOverrides).toEqual({})
+    const legacySub = structuredClone(DEFAULT_SETTINGS.subagent) as Record<string, unknown>
+    delete legacySub.modelOverrides
+    const legacy = structuredClone(DEFAULT_SETTINGS) as Partial<AppSettings>
+    legacy.subagent = legacySub as AppSettings['subagent']
+    expect(mergeSettings(DEFAULT_SETTINGS, legacy).subagent.modelOverrides).toEqual({})
+  })
+
+  it('★ 条目内部成对:只给某角色 model 时,旧的 modelProviderId 被清掉而不是留下', () => {
+    let s = mergeSettings(base(), {
+      subagent: { modelOverrides: { 'code-analyst': { model: 'cheap', modelProviderId: 'routin' } } }
+    })
+    expect(s.subagent.modelOverrides['code-analyst'])
+      .toEqual({ model: 'cheap', modelProviderId: 'routin' })
+    s = mergeSettings(s, { subagent: { modelOverrides: { 'code-analyst': { model: 'other' } } } })
+    // 「A 家别名 + B 家锁」的拼盘在这里复活一次的表现:候选集为空,报错指着 B
+    expect(s.subagent.modelOverrides['code-analyst'])
+      .toEqual({ model: 'other', modelProviderId: undefined })
+  })
+
+  it('★ 按 key 合并:连续 patch 两个角色,第一个不被冲掉', () => {
+    let s = mergeSettings(base(), {
+      subagent: { modelOverrides: { 'code-analyst': { model: 'cheap', modelProviderId: 'routin' } } }
+    })
+    s = mergeSettings(s, {
+      subagent: { modelOverrides: { 'code-reviewer': { model: 'smart', modelProviderId: 'codex' } } }
+    })
+    expect(s.subagent.modelOverrides).toEqual({
+      'code-analyst': { model: 'cheap', modelProviderId: 'routin' },
+      'code-reviewer': { model: 'smart', modelProviderId: 'codex' }
+    })
+  })
+
+  it('坏形状条目逐条丢弃、其余保留,且不冲掉该角色已有的有效配置', () => {
+    let s = mergeSettings(base(), {
+      subagent: { modelOverrides: { 'code-analyst': { model: 'cheap', modelProviderId: 'routin' } } }
+    })
+    s = mergeSettings(s, {
+      subagent: {
+        modelOverrides: {
+          'code-analyst': 'garbage',
+          'code-reviewer': { model: 42 },
+          'code-editor': null,
+          'general-purpose': { model: 'ok', modelProviderId: 'codex' }
+        } as unknown as AppSettings['subagent']['modelOverrides']
+      }
+    })
+    expect(s.subagent.modelOverrides).toEqual({
+      'code-analyst': { model: 'cheap', modelProviderId: 'routin' },
+      'general-purpose': { model: 'ok', modelProviderId: 'codex' }
+    })
+  })
+
+  it('空 model 的条目被剪掉 —— 盘上不累积死键', () => {
+    let s = mergeSettings(base(), {
+      subagent: { modelOverrides: { 'code-analyst': { model: 'cheap', modelProviderId: 'routin' } } }
+    })
+    s = mergeSettings(s, { subagent: { modelOverrides: { 'code-analyst': { model: '   ' } } } })
+    expect(s.subagent.modelOverrides).toEqual({})
+  })
+
+  it('★ 危险键(__proto__ 等)与不合法角色名一律跳过:不写入、不污染原型,其余条目照常', () => {
+    // JSON.parse 才能把 `__proto__` 造成**自有键**;对象字面量会走 setter,
+    // 测不到合并路径本身。
+    const patchOverrides = JSON.parse(`{
+      "__proto__": {"model": "evil"},
+      "constructor": {"model": "evil2"},
+      "prototype": {"model": "evil3"},
+      "bad name": {"model": "x"},
+      "code-analyst": {"model": "ok", "modelProviderId": "routin"}
+    }`) as AppSettings['subagent']['modelOverrides']
+    const s = mergeSettings(base(), { subagent: { modelOverrides: patchOverrides } })
+    expect(s.subagent.modelOverrides).toEqual({
+      'code-analyst': { model: 'ok', modelProviderId: 'routin' }
+    })
+    // 原型没被污染 —— 这是危险键守卫要挡的那个
+    expect(Object.hasOwn(Object.prototype, 'evil')).toBe(false)
+    expect(({} as Record<string, unknown>).evil).toBeUndefined()
   })
 })
 

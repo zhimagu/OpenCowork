@@ -17,6 +17,7 @@ import { useTabsStore } from '../../stores/tabs'
 import { IconButton } from '../../components/ui/IconButton'
 import { cn } from '../../lib/cn'
 import { Spinner } from '../../components/ui/Spinner'
+import { useWorkspaceActive } from '../../shell/workspace-active'
 import { isAddressableUrl, isExternalOpenableUrl, resolveAddress } from './address'
 
 interface BrowserElement extends HTMLElement {
@@ -26,7 +27,18 @@ interface BrowserElement extends HTMLElement {
   reload?: () => void
   openDevTools?: () => void
   getWebContentsId?: () => number
+  isAudioMuted?: () => boolean
+  setAudioMuted?: (muted: boolean) => void
+  /** guest 是否仍在加载。注册监听前 guest 可能已经开转/停转，用它对齐一次状态。 */
+  isLoading?: () => boolean
 }
+
+/**
+ * 失活前读到的 guest 静音值（设计 §4.8.3）。不持久化、不进 store —— 读的是
+ * Electron 运行时现值，激活时恢复原值，避免「切回工作区瞬间突然出声」。
+ * key = clientTabId（即 tab.id）。
+ */
+const audioMutedByTab = new Map<string, boolean>()
 
 interface CuaIndicator extends BrowserCuaEvent {
   visible: boolean
@@ -56,6 +68,45 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   const [error, setError] = useState<string | null>(null)
   const [cuaIndicator, setCuaIndicator] = useState<CuaIndicator | null>(null)
   const viewRef = useRef<BrowserElement | null>(null)
+  const { active } = useWorkspaceActive()
+  // did-attach 监听闭包拿不到最新的 active，用 ref 兜住，供 attach 后对齐静音。
+  const activeRef = useRef(active)
+  activeRef.current = active
+
+  /*
+    媒体隔离（设计 §4.8.3）：失活时先读一次运行时静音值存入模块级 Map，再静音；
+    激活时恢复该值（无记录默认 false）。MVP 不调用 setBackgroundThrottling。
+    webview ref 可能为空（url 为空分支不渲染）或尚未 attach —— attach 前调用会抛，
+    与 getWebContentsId 同理，用 try/catch 吞掉，等下次 active 变化再处理。
+  */
+  useEffect(() => {
+    const view = viewRef.current
+    if (view === null) return
+    if (!active) {
+      let muted: boolean
+      try {
+        muted = view.isAudioMuted?.() ?? false
+      } catch {
+        muted = false
+      }
+      audioMutedByTab.set(tab.id, muted)
+      try {
+        view.setAudioMuted?.(true)
+      } catch {
+        // Guest 尚未 attach：Electron 在 did-attach 前调用会抛。
+      }
+      return
+    }
+    const restore = audioMutedByTab.get(tab.id) ?? false
+    try {
+      view.setAudioMuted?.(restore)
+    } catch {
+      // Guest 尚未 attach。
+    }
+  }, [active, tab.id])
+
+  // 模块级 Map 以 tab.id 为键且永不自动清理；组件卸载（tab 生命周期结束）时删除，避免泄漏。
+  useEffect(() => () => { audioMutedByTab.delete(tab.id) }, [tab.id])
 
   useEffect(() => {
     setUrl(tab.ref.url)
@@ -95,7 +146,38 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
         // Before did-attach Electron throws instead of returning an absent id.
         return
       }
+      /*
+        attach 后对齐静音，防 G13 回归（隐藏页持续出声）：若失活发生在 attach
+        之前，上面的静音 effect 调用 setAudioMuted 会因 guest 未 attach 抛错被吞，
+        隐藏页可能持续出声。这里在 attach 确认后补一次对齐，并照常记录运行时静音值。
+      */
+      if (!activeRef.current) {
+        let muted: boolean
+        try {
+          muted = view.isAudioMuted?.() ?? false
+        } catch {
+          muted = false
+        }
+        audioMutedByTab.set(tab.id, muted)
+        try {
+          view.setAudioMuted?.(true)
+        } catch {
+          // 仍可能未就绪；后续 active 变化会再对齐。
+        }
+      }
       if (browserId === undefined || typeof webContentsId !== 'number' || !Number.isInteger(webContentsId) || webContentsId <= 0) return
+      /*
+        attach 后对齐 loading（与上面的静音对齐同范式）：监听注册可能晚于 guest 的
+        加载事件（层重挂载时 webview 挂上就开始加载），错过 did-start/stop-loading
+        会让转圈卡在错误状态（不停或该转不转）。attach 确认后用元素真实状态对齐一次，
+        事件只负责后续增量。★ 不能在 effect 里直接调——webview 方法在 attach 前调用
+        会 throw（"must be attached to the DOM"），未捕获会把整棵 React 树卸载。
+      */
+      try {
+        setLoading(view.isLoading?.() ?? false)
+      } catch {
+        // 理论上 attach 后不会抛；兜底保持现状，后续事件会对齐。
+      }
       void bindBrowserView(workspace.id, browserId, webContentsId).catch(() => {
         if (alive) setError(t('browser.operationFailed'))
       })
@@ -113,13 +195,22 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       if (tab.ref.browserId !== undefined && tab.ref.browserId !== '') {
         void navigateBrowserTab(workspace.id, tab.ref.browserId, next).catch(() => undefined)
       }
-      setLoading(false)
+      // 这里不复位 loading：Chrome 的转圈要到 did-stop-loading（子资源全部加载完）才停，
+      // did-navigate 只是提交。提前复位会让「子资源还挂着」的页面被当成加载完成
+      // （探针 3a/3b 实证：isLoading()=true 而角标已消失）。失败由 did-fail-load 复位。
     }
     const onStart = (): void => setLoading(true)
     const onStop = (): void => setLoading(false)
     const onFail = (): void => {
       setLoading(false)
       setError(t('browser.loadFailed'))
+    }
+    /*
+      guest 自愈观测（设计 §4.1.4 规则 5）：保活后 guest 被意外销毁必须不静默。
+      仅上报，不在此处做自愈动作。
+    */
+    const onDestroyed = (): void => {
+      console.warn('[browser] webview guest destroyed', { tabId: tab.id, workspaceId: workspace.id })
     }
 
     view.addEventListener('did-attach', onAttach)
@@ -128,6 +219,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
     view.addEventListener('did-start-loading', onStart)
     view.addEventListener('did-stop-loading', onStop)
     view.addEventListener('did-fail-load', onFail)
+    view.addEventListener('destroyed', onDestroyed)
     onAttach()
     return () => {
       alive = false
@@ -137,6 +229,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       view.removeEventListener('did-start-loading', onStart)
       view.removeEventListener('did-stop-loading', onStop)
       view.removeEventListener('did-fail-load', onFail)
+      view.removeEventListener('destroyed', onDestroyed)
     }
   }, [setBrowser, tab.id, tab.ref.browserId, workspace.id, t])
 
@@ -252,6 +345,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
             ref={(node) => {
               viewRef.current = node as BrowserElement | null
             }}
+            data-browser-tab-id={tab.id}
             src={url}
             partition={browserPartition(workspace.id, tab.ref.profileId)}
             allowpopups={false}

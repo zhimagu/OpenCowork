@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { OptionRow, ROW_HIT, RowLead } from '../../components/ui/ChoiceCards'
+import { useWorkspaceActive } from '../../shell/workspace-active'
 import { isEditableTarget, isSelfHandlingButton, resolveRowKey } from './interaction-keys'
 
 export interface ActionRowSpec {
@@ -43,16 +44,22 @@ export function ActionRows({
   const [expanded, setExpanded] = useState<string | null>(null)
   const container = useRef<HTMLDivElement>(null)
   const buttons = useRef<(HTMLButtonElement | null)[]>([])
+  // 所在工作区是否激活。keepalive 后卡片可能在失活的工作区里挂载(后台到审批卡),
+  // 不守卫的话会把焦点抢进隐藏层(keepalive v3.1 §4.9)。
+  const { active: layerActive } = useWorkspaceActive()
   // 行数会变(展开编辑参数时「以后都允许」就撤走了),高亮不能停在一个
   // 已经不存在的下标上 —— 那样收起之后整列看不出 Enter 会落在哪。
   const current = active < rows.length ? active : 0
 
   // ★ 卡片出现时把焦点接过来 —— 否则数字键形同虚设,焦点常年在下面的输入框上。
   //   但**只在用户没在打字时接**:正写到一半被抢走焦点,比没有快捷键糟得多。
+  //   且只在所在工作区激活时接:失活期间挂载的不抢焦点(隐藏层),激活(含切回)
+  //   时再接 —— 与常驻前「切回工作区重挂载即聚焦」的行为一致。
   useEffect(() => {
+    if (!layerActive) return
     if (isEditableTarget(document.activeElement)) return
     container.current?.focus({ preventScroll: true })
-  }, [])
+  }, [layerActive])
 
   function focusRow(index: number): void {
     setActive(index)

@@ -236,6 +236,7 @@ export function OuterTabBar({
             )}
             <button
               type="button"
+              data-outer-tab-close
               aria-label={t("nav.closeTab", { label })}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {

@@ -1,7 +1,8 @@
 import { Check, ChevronDown } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "../../lib/cn";
+import { useWorkspaceActive } from "../../shell/workspace-active";
 
 export type SelectOption = {
   value: string;
@@ -53,13 +54,29 @@ export function Select({
   }
   const radixValue = value === "" ? emptyValue : value;
 
+  /*
+    失活 = 正常关闭（设计 §4.7.2 / v3.1 D7）。Root 改为受控：effect 把 open 置 false，
+    让 Radix 走自身 dismiss（FocusScope 归还焦点、解锁滚动）；不在 Portal/Content
+    层硬卸载 —— 硬卸载会与焦点恢复抢焦点并残留 open 状态。无 Provider 时 active 恒
+    true，行为与原先的非受控用法一致。
+  */
+  const { active } = useWorkspaceActive();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!active) setOpen(false);
+  }, [active]);
+
   return (
     <SelectPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        onOpenChange?.(next);
+      }}
       value={radixValue}
       onValueChange={(nextValue) =>
         onValueChange(nextValue === emptyValue ? "" : nextValue)
       }
-      onOpenChange={onOpenChange}
     >
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}

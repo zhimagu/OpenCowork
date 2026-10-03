@@ -61,6 +61,51 @@ describe('browser workspace isolation', () => {
     expect(useWindowStore.getState().rightPanelOpen).toBe(true)
   })
 
+  it('per-workspace right/bottom 面板：活动用投影字段，后台写入 byWorkspace，切换后各自恢复', () => {
+    useWindowStore.setState({
+      outer: [workspaceTab('outer-a', 'workspace-a'), workspaceTab('outer-b', 'workspace-b')],
+      activeOuterId: 'outer-a',
+      activeWorkspaceId: 'workspace-a',
+      rightPanelOpen: false,
+      bottomPanelOpen: false,
+      rightPanelOpenByWorkspace: {},
+      bottomPanelOpenByWorkspace: {}
+    })
+
+    // 活动 A：开关走投影字段（rightPanelOpen / bottomPanelOpen），同时写入 byWorkspace。
+    useWindowStore.getState().toggleRightPanel()
+    useWindowStore.getState().toggleBottomPanel()
+    expect(useWindowStore.getState().rightPanelOpen).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpen).toBe(true)
+    expect(useWindowStore.getState().rightPanelOpenByWorkspace['workspace-a']).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpenByWorkspace['workspace-a']).toBe(true)
+
+    // 后台 B：定向写入只落 byWorkspace，不改变活动 A 的投影。
+    useWindowStore.getState().setRightPanelForWorkspace('workspace-b', true)
+    useWindowStore.getState().setBottomPanelForWorkspace('workspace-b', true)
+    expect(useWindowStore.getState().activeWorkspaceId).toBe('workspace-a')
+    expect(useWindowStore.getState().rightPanelOpen).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpen).toBe(true)
+    expect(useWindowStore.getState().rightPanelOpenByWorkspace['workspace-b']).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpenByWorkspace['workspace-b']).toBe(true)
+
+    // 切到 B：恢复 B 自己的开合态。
+    useWindowStore.getState().activate('outer-b')
+    expect(useWindowStore.getState().rightPanelOpen).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpen).toBe(true)
+
+    // 在 B 关掉底部：只影响 B，A 的记录仍是开。
+    useWindowStore.getState().toggleBottomPanel()
+    expect(useWindowStore.getState().bottomPanelOpen).toBe(false)
+    expect(useWindowStore.getState().bottomPanelOpenByWorkspace['workspace-b']).toBe(false)
+    expect(useWindowStore.getState().bottomPanelOpenByWorkspace['workspace-a']).toBe(true)
+
+    // 切回 A：恢复 A 自己的开合态，而不是沿用 B 的。
+    useWindowStore.getState().activate('outer-a')
+    expect(useWindowStore.getState().rightPanelOpen).toBe(true)
+    expect(useWindowStore.getState().bottomPanelOpen).toBe(true)
+  })
+
   it('Agent 标签只写入目标工作区，并成为该工作区右侧面板的活动标签', () => {
     const a = chatTab('chat-a')
     const b = chatTab('chat-b')

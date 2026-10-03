@@ -41,6 +41,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../../lib/cn'
 import { usePresence } from '../../lib/usePresence'
+import { useWorkspaceActive } from '../../shell/workspace-active'
 import { IconButton } from './IconButton'
 import { useFocusTrap } from './useFocusTrap'
 import { useI18n } from '../../i18n'
@@ -67,9 +68,24 @@ export function Dialog({
   children: ReactNode
 }): ReactNode {
   const { t } = useI18n()
+  const { active } = useWorkspaceActive()
   const panelRef = useRef<HTMLDivElement>(null)
   const firstRef = useRef<HTMLDivElement>(null)
   const presence = usePresence(open, DIALOG_MS, true)
+
+  // onClose 多为调用方内联箭头，引用每次 render 都变；若直接进依赖，失活期间
+  // effect 会随父级重渲染反复重跑、onClose 被连续调用。用 ref 持有最新引用。
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  /*
+    失活 = 正常关闭（设计 §4.7.2 / v3.1 D7）：走调用方的 onClose，触发 Presence
+    退场动画，不返回 null 硬卸载 —— 硬卸载会让 FocusScope 的焦点恢复与保活层的
+    焦点恢复互相抢焦点，并可能残留 open 状态。无 Provider 时 active 恒 true，行为不变。
+  */
+  useEffect(() => {
+    if (!active && open) onCloseRef.current()
+  }, [active, open])
 
   // Presence mounts the panel before the first frame of an opening transition and
   // keeps it mounted until the closing transition has finished.  Tie the focus

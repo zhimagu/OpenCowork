@@ -117,6 +117,7 @@ import {
 import { Slider } from "../../components/ui/Slider";
 import { Tooltip } from "../../components/ui/Tooltip";
 import { cn } from "../../lib/cn";
+import { useWorkspaceActive } from "../../shell/workspace-active";
 import { GoalPanel, GoalPill } from './GoalPanel';
 import { ConversationCostDetails } from './ConversationCostDetails';
 import { CodingPlanQuotaSection } from './CodingPlanQuotaSection';
@@ -353,8 +354,9 @@ export function Composer({
   */
   const [preview, setPreview] = useState<ContextPreview | undefined>(undefined);
   const input = useRef<MentionInputHandle | null>(null);
+  const { active } = useWorkspaceActive();
   /*
-    ★ **挂载即取焦点** —— 这是「新对话里第一次 Ctrl+V 一定没反应」的修法。
+    ★ **本层变 active 时取焦点** —— 这是「新对话里第一次 Ctrl+V 一定没反应」的修法。
     在此之前首屏的 `document.activeElement` 是 `<body>`(CDP 探针实测):输入框
     看上去随时能打字,但键盘事件(粘贴在内)根本不会送到它这里,必须先用鼠标
     点一下 —— 于是「第一次失败、点一下之后第二次就好」成了稳定复现的现象。
@@ -362,12 +364,15 @@ export function Composer({
     另一个受益的场合是草稿铸出会话 id 的那次重挂(见 `draft-handoff.ts`):
     新画出来的 contentEditable 是另一个 DOM 节点,焦点不会自己跟过去。
 
-    ★ 只在**挂载**时跑。非激活的 Tab 在 `shell/Dock.tsx` 里压根没有挂载,
-    所以「挂载」就等于「这个对话刚成为可见的那一个」—— 不会去抢别人的焦点。
+    ★ 工作区保活后旧假设「非激活 Tab 不挂载 ⇒ 挂载即可见」已失效 —— 常驻层在
+    失活时仍挂载。因此改为依赖本层 `active`(经 `useWorkspaceActive()`):
+    首次挂载 active=true 时行为不变,切回已常驻的工作区时也能重新聚焦。
+    元素存在性由 `input.current?.` 守卫。
   */
   useEffect(() => {
+    if (!active) return;
     input.current?.focus();
-  }, []);
+  }, [active]);
   const lastCaret = useRef<number | null>(null);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [commands, setCommands] = useState<CommandDefinition[]>([]);

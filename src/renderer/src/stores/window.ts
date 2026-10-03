@@ -367,9 +367,13 @@ export const useWindowStore = create<WindowState>((set, get) => {
     async openWorkspace(workspaceId) {
       const existing = get().outer.find((t) => t.kind === 'workspace' && t.ref.workspaceId === workspaceId)
       if (existing !== undefined) {
+        // 命中已存在的外层 Tab:该工作区回到 stage,拔掉关闭时写的墓碑。
+        useTabsStore.getState().revive(workspaceId)
         return get().activate(existing.id)
       }
       const commit = (): boolean => {
+      // 新建外层 Tab:该工作区回到 stage,拔掉关闭时写的墓碑。
+      useTabsStore.getState().revive(workspaceId)
       const tab: OuterTab = {
         id: ulid(),
         kind: 'workspace',

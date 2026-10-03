@@ -109,6 +109,28 @@ describe('browser management navigation', () => {
     expect(state.rightPanelOpen).toBe(true)
   })
 
+  it('激活已存在的 feature 外层 tab：外层 Tab 与工作区上下文不变，只切换 activeOuterId', () => {
+    /*
+      ★ H4 的 store 前提（设计 §4.2.3 / §9.2.3）：feature 外层 tab 激活时
+      `activeWorkspaceId` 故意保留原工作区 —— 这正是 AppShell 里
+      `baseShellActive === true` 而 `baseActive === false` 的输入。
+      `baseShellActive` / `baseActive` 本身是 AppShell 组件内闭包（AppShell.tsx:434-435），
+      不可导入单测，那部分由 E2E / 手动场景覆盖。
+    */
+    const featureTab: OuterTab = { id: 'outer-review', kind: 'feature', ref: { feature: 'review' } }
+    const outer = [workspaceTab(), featureTab]
+    useWindowStore.setState({ outer, activeOuterId: 'outer-a', activeWorkspaceId: 'workspace-a' })
+
+    useWindowStore.getState().activate('outer-review')
+
+    const state = useWindowStore.getState()
+    expect(state.outer).toBe(outer)
+    expect(state.activeOuterId).toBe('outer-review')
+    expect(state.activeWorkspaceId).toBe('workspace-a')
+    expect(state.activeStandaloneFeature).toBeNull()
+    expect(mockPersistOuter).toHaveBeenCalledWith('main', expect.objectContaining({ activeOuterId: 'outer-review' }))
+  })
+
   it('定时任务也只切换独立主内容模式，不创建外层标签', () => {
     useWindowStore.getState().openFeature('scheduled')
 

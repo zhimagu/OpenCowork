@@ -29,6 +29,7 @@ import {
 import {
   Fragment,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -57,6 +58,7 @@ import { useI18n, type TranslationKey } from "../i18n";
 import { documentKey, isDocumentDirty, useDocumentsStore } from '../stores/documents';
 import { DOCK_TAB_MIME } from './dock-layout';
 import { Spinner } from '../components/ui/Spinner'
+import { useRunIndex } from '../stores/session'
 
 function revealTab(strip: HTMLDivElement | null, id: string | null): void {
   if (strip === null || id === null) return;
@@ -86,7 +88,6 @@ export function InnerTabBar({
   workspaceId,
   canDragTab,
   activeId,
-  runningSessionIds,
   menu,
   trailing,
   className,
@@ -101,7 +102,6 @@ export function InnerTabBar({
   workspaceId?: string;
   canDragTab?: (tab: InnerTab) => boolean;
   activeId: string | null;
-  runningSessionIds: ReadonlySet<string>;
   /**
    * `+` 菜单的内容 —— 内置项与插件贡献项**已经合并好**(见 `shell/tab-menu.ts`)。
    * 三条 Tab 条共用这一个组件,差异全在这个参数里。
@@ -131,6 +131,14 @@ export function InnerTabBar({
   onRename?: (tab: InnerTab, value: string) => void;
 }): ReactNode {
   const { t } = useI18n();
+  /*
+    ★ D2/H1：运行中角标的数据源就在本组件订阅，不沿 Dock props 链透传。
+    理由：`App.tsx:222` 的 `new Set(...)` 在任何 run 变化时都换新引用，
+    沿 props 传入会击穿所有保活层的 `memo`。这里订阅同一份 RunRegistry 投影，
+    再把 `runIndex` useMemo 成 Set —— 重渲染范围收敛到本条 Tab 条。
+  */
+  const runIndex = useRunIndex();
+  const runningSessionIds = useMemo(() => new Set(runIndex.map((run) => run.sessionId)), [runIndex]);
   const drafts = useDocumentsStore((state) => state.entries);
   const { dragging, onPointerDown, styleFor } = useDragReorder(onMove);
   const mainChatCount = tabs.filter((tab) => tab.kind === 'chat' && paneOf(tab) === 'main').length;

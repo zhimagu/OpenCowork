@@ -28,6 +28,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import {
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -36,6 +37,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../../lib/cn'
+import { useWorkspaceActive } from '../../shell/workspace-active'
 import { motionScale, useMotionLevel } from '../../theme/useMotionLevel'
 
 /** 提示与触发器之间的空隙 */
@@ -71,6 +73,16 @@ export function Tooltip({
   const timer = useRef<number | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number; placement: Placement } | null>(null)
+  const { active } = useWorkspaceActive()
+
+  /*
+    失活 = 关闭当前提示（设计 §4.7.2 / v3.1 D7）。delay / 触发逻辑不变，只强制收起；
+    渲染条件再叠加 active，保证收起动画开始前那一帧也不再显示。无 Provider 时
+    active 恒 true，行为不变。
+  */
+  useEffect(() => {
+    if (!active) setOpen(false)
+  }, [active])
 
   const show = useCallback((immediate = false) => {
     window.clearTimeout(timer.current)
@@ -154,7 +166,7 @@ export function Tooltip({
 
       {createPortal(
         <AnimatePresence>
-          {open && (
+          {open && active && (
             <motion.div
               id={id}
               ref={tipRef}

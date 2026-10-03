@@ -22,11 +22,13 @@
  */
 import { PanelLeft } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { Bootstrap } from "../../../shared/domain/bootstrap";
 import type { AppSettings } from "../../../shared/domain/settings";
 import type { Workspace } from "../../../shared/domain/workspace";
 import type { SessionListItem } from "../../../shared/domain/session";
 import type { ClientAuthState } from "../../../shared/domain/client-auth";
+import { isLocalEnvironment } from "../../../shared/domain/environment";
 import { IconButton } from "../components/ui/IconButton";
 import { cn } from "../lib/cn";
 import { IS_MAC } from "../lib/platform";
@@ -57,9 +59,9 @@ import { submitWorkspaceRename } from './tab-rename-actions';
 import { placePluginTab } from './plugin-tab-target';
 import { PluginInteractionHost } from './PluginInteractionHost';
 import { toast } from '../stores/toast';
-import { DockRoot } from './Dock';
 import type { DockNode } from '../../../shared/domain/dock';
 import { ConnectionDialogs } from './ConnectionDialogs';
+import { WorkspaceDockLayer, orderOf, hasBrowserTab, capResident, useResidentDebounce } from './WorkspaceDockLayer';
 import { CreateSshWorkspaceDialog } from './CreateSshWorkspaceDialog';
 import { EditWorkspaceDialog } from './EditWorkspaceDialog';
 
@@ -76,6 +78,22 @@ import { EditWorkspaceDialog } from './EditWorkspaceDialog';
  * 上限在 350 附近 —— 再长就开始觉得点了没反应。
  */
 const PANEL_MS = 280;
+
+/**
+ * resident 进入/移出的去抖窗口（设计 §4.1.5 + v3.1 B2）。
+ *
+ * `browser:changed` 经 `emitToAll` 广播到所有窗口，一次 UI 操作可分多批到达，
+ * `syncBrowserTabs` 的 prune 又依赖批次内的 `remoteIds` —— 关闭最后一个 browser tab
+ * 可能在批次间表现为 `hasBrowser: true → false → true → false` 的抖动。直接移出会
+ * 导致层被卸载又重建、guest 销毁，正是本方案要避免的。**进入也必须去抖**：resident
+ * 判定不要求可见，Agent 在后台工作区新开一个 browser tab 就会触发 MAX_RESIDENT 降级。
+ */
+const RESIDENT_DEBOUNCE_MS = 300;
+
+/** 按 id 去重、保持首次出现顺序。`hydrate` 不校验损坏/旧数据，outer 可能重复。 */
+function dedupe(ids: readonly string[]): string[] {
+  return [...new Set(ids)]
+}
 
 export function AppShell({
   settings,
@@ -95,6 +113,37 @@ export function AppShell({
   auth: ClientAuthState;
 }): ReactNode {
   const { t } = useI18n();
+  /*
+    ★ selector 收敛（设计 §5.3）：不再全量订阅 window store。只取推导 stage / 渲染
+    外壳所需的原始值与稳定 action —— action 引用恒定，不会引发额外重渲染；
+    `workspaceTargets` 只在 workspace:changed 时换引用。
+  */
+  const win = useWindowStore(useShallow((s) => ({
+    outer: s.outer,
+    activeOuterId: s.activeOuterId,
+    activeWorkspaceId: s.activeWorkspaceId,
+    activeStandaloneFeature: s.activeStandaloneFeature,
+    sidebarCollapsed: s.sidebarCollapsed,
+    rightPanelOpen: s.rightPanelOpen,
+    bottomPanelOpen: s.bottomPanelOpen,
+    settingsPage: s.settingsPage,
+    scheduledUnread: s.scheduledUnread,
+    rewardsOpen: s.rewardsOpen,
+    workspaceTargets: s.workspaceTargets,
+    activate: s.activate,
+    close: s.close,
+    move: s.move,
+    togglePin: s.togglePin,
+    toggleSidebar: s.toggleSidebar,
+    toggleRightPanel: s.toggleRightPanel,
+    toggleBottomPanel: s.toggleBottomPanel,
+    openFeature: s.openFeature,
+    openWorkspace: s.openWorkspace,
+    openSettings: s.openSettings,
+    closeStandaloneFeature: s.closeStandaloneFeature,
+    closeSettings: s.closeSettings,
+    closeRewards: s.closeRewards
+  })));
   const {
     outer,
     activeOuterId,
@@ -106,13 +155,52 @@ export function AppShell({
     settingsPage,
     scheduledUnread,
     rewardsOpen,
-  } = useWindowStore();
-  const win = useWindowStore();
+    workspaceTargets
+  } = win;
   useEffect(() => onScheduledChanged((event) => {
     if (event.kind === 'run' && (event.status === 'success' || event.status === 'error' || event.status === 'skipped') && useWindowStore.getState().activeStandaloneFeature !== 'scheduled') useWindowStore.setState({ scheduledUnread: true })
   }), []);
-  const tabs = useTabsStore();
+  /*
+    ★ tabs store 同样只订阅 stage 推导与侧边栏所需的切片（设计 §5.3）：
+    - `ensureTabs` 是稳定 action；
+    - 活动工作区的 `tabs` / `activeTabId` 驱动侧边栏会话区与路由 hash；
+    - 其余工作区只投影成 `${id}:${hasBrowser?1:0}` 原始值，避免 resizeDock 等
+      高频写入先重渲染 AppShell、再重渲染所有层。
+  */
   const ensureTabs = useTabsStore((s) => s.ensure);
+  /*
+    ★ M1：`tabs` 数组**不能直接订阅**。`write` 每次都会经 `withDock` →
+    `normalizeDockState` 重建 tabs 数组（`.filter().map()` 必然新建引用），而
+    resizeDock 是拖动分隔条时的每帧写入 —— 直接订阅数组会让高频拖拽击穿 AppShell、
+    再连带重渲染所有层。这里只订阅「Tab 身份签名」这个原始值：resizeDock 不改
+    id / kind / title / sessionId，签名稳定 → 不重渲染；签名变化时再从 store 取数组。
+  */
+  const activeInnerKey = useTabsStore((s) => {
+    if (activeWorkspaceId === null) return '';
+    const tabs = s.byWorkspace[activeWorkspaceId]?.tabs;
+    if (tabs === undefined) return '';
+    return tabs.map((tab) => `${tab.id}\u0001${tab.kind}\u0001${tab.title}\u0001${tab.kind === 'chat' ? tab.ref.sessionId : ''}`).join('\u0002');
+  });
+  const activeInnerTabs = useMemo(
+    () => activeWorkspaceId === null ? undefined : useTabsStore.getState().byWorkspace[activeWorkspaceId]?.tabs,
+    [activeInnerKey, activeWorkspaceId]
+  );
+  const activeInnerActiveId = useTabsStore((s) => activeWorkspaceId === null ? undefined : s.byWorkspace[activeWorkspaceId]?.activeTabId);
+  const outerWorkspaceIds = useMemo(
+    () => dedupe(outer.filter((tab) => tab.kind === 'workspace').map((tab) => tab.ref.workspaceId)),
+    [outer]
+  );
+  /*
+    ★ `useShallow` 浅比较陷阱（设计 §5.3）：派生值只含原始值（字符串），逐元素
+    `Object.is` 才有效。若 map 成 `{id, hasBrowser}` 对象数组，每次都是新对象，
+    浅比较恒不相等、抑制不了重渲染。对象解析放到下面的 useMemo 里做。
+  */
+  const hydrationProjection = useTabsStore(useShallow((s) =>
+    outerWorkspaceIds.map((id) => {
+      const state = s.byWorkspace[id]
+      return `${id}:${state === undefined ? -1 : hasBrowserTab(state) ? 1 : 0}`
+    })
+  ));
 
   /*
     插件请求打开它的自定义编辑器。
@@ -212,23 +300,94 @@ export function AppShell({
    * 一个事实,所以都走同一条动画,不需要各接一条。
    */
   const sidebar = usePresence(!sidebarCollapsed, PANEL_MS);
-  const rightEdge = usePresence(rightPanelOpen, PANEL_MS);
-  const bottomEdge = usePresence(bottomPanelOpen, PANEL_MS);
 
   const activeOuter = outer.find((t) => t.id === activeOuterId);
   const workspace = workspaces.find((w) => w.id === activeWorkspaceId);
+
+  /*
+    ★ stage 渲染集推导（设计 §4.1）。
+    resident = outer 的 workspace ∩ byWorkspace 已水合 ∩ 本地环境 ∩ 存在 browser 内层 Tab；
+    transient = 当前 visible 判据成立且不在 resident（含活动但无 browser tab、远程活动）。
+    resident 进入/移出都过 300ms 去抖，再按 MAX_RESIDENT 降级。
+  */
+  const byWorkspaceInfo = useMemo(() => {
+    const info = new Map<string, { hydrated: boolean; hasBrowser: boolean }>();
+    for (const entry of hydrationProjection) {
+      const sep = entry.lastIndexOf(':');
+      const id = entry.slice(0, sep);
+      const flag = entry.slice(sep + 1);
+      info.set(id, { hydrated: flag !== '-1', hasBrowser: flag === '1' });
+    }
+    return info;
+  }, [hydrationProjection]);
+
+  const residentCandidates = useMemo(() => {
+    const candidates = new Set<string>();
+    for (const id of outerWorkspaceIds) {
+      const info = byWorkspaceInfo.get(id);
+      if (info === undefined || !info.hydrated || !info.hasBrowser) continue;
+      const target = workspaceTargets[id];
+      if (target === undefined || !isLocalEnvironment(target.environment)) continue;
+      candidates.add(id);
+    }
+    return candidates;
+  }, [outerWorkspaceIds, byWorkspaceInfo, workspaceTargets]);
+
+  // ★ 进入/移出双向去抖：窗口内该层保持挂载（设计 §4.1.5 规则 3 + v3.1 B2）。
+  const stableResident = useResidentDebounce(residentCandidates, RESIDENT_DEBOUNCE_MS);
+
+  /*
+    ★ visible 判据严格用 5.1 的四条件式。功能 Tab 激活时 activeWorkspaceId 故意
+    保留原工作区，所以不能只凭它判断可见；远程 / transient 层同样用这个判据。
+  */
+  const visibleWorkspaceId =
+    activeStandaloneFeature === null &&
+    activeOuter?.kind === 'workspace' &&
+    activeWorkspaceId !== null &&
+    activeOuter.ref.workspaceId === activeWorkspaceId
+      ? activeWorkspaceId
+      : null;
+
+  // ★ MAX_RESIDENT 降级 + append-only 顺序（orderOf 在 useMemo 内做惰性 seq 写入）。
+  const resident = useMemo(
+    () => capResident(stableResident, visibleWorkspaceId),
+    [stableResident, visibleWorkspaceId]
+  );
+  const stage = useMemo(() => {
+    // transient：visible 且已水合、且不在 resident。未水合的活动工作区走骨架态，
+    // 不放进 stage（避免用一个空 Dock 顶替骨架，见 4.1.8）。
+    const transient = visibleWorkspaceId !== null
+      && !resident.has(visibleWorkspaceId)
+      && byWorkspaceInfo.get(visibleWorkspaceId)?.hydrated === true
+      ? [visibleWorkspaceId]
+      : [];
+    return orderOf(dedupe([...resident, ...transient]));
+  }, [resident, visibleWorkspaceId, byWorkspaceInfo]);
+
+  /*
+    ★ 水合三态（设计 §4.1.8）：无活动工作区 → 空态；活动但未水合 → 骨架；否则正常层。
+    ★ `baseShellActive` / `baseActive` 分离（4.2.3 / H4）：容器用前者；feature 外层 tab
+    激活时（baseActive=false）外层 Tab 条必须保持可见可交互，否则用户切不回工作区。
+  */
+  const baseShellActive = activeStandaloneFeature === null;
+  const baseActive = baseShellActive && activeOuter?.kind === 'workspace' && activeWorkspaceId !== null;
+  const activeWorkspace = activeWorkspaceId === null ? undefined : workspaceTargets[activeWorkspaceId];
+  const activeHydrated = activeWorkspaceId !== null && byWorkspaceInfo.get(activeWorkspaceId)?.hydrated === true;
+  const showEmptyState = baseShellActive && activeOuter?.kind !== 'feature' && (!baseActive || activeWorkspace === undefined);
+  const hydrating = baseShellActive && activeOuter?.kind !== 'feature' && activeWorkspaceId !== null && activeWorkspace !== undefined && !activeHydrated;
+
   const firstGroupId = (node: DockNode): string | null => node.type === 'group' ? node.id : firstGroupId(node.first);
   const toggleDockEdge = (edge: 'bottom' | 'right'): void => {
     if (activeWorkspaceId === null) return;
     const opening = edge === 'bottom' ? !bottomPanelOpen : !rightPanelOpen;
     if (edge === 'bottom') win.toggleBottomPanel(); else win.toggleRightPanel();
     if (!opening) return;
-    const dock = tabs.dockOf(activeWorkspaceId);
+    const dock = useTabsStore.getState().dockOf(activeWorkspaceId);
     const hasEdge = dock.tabs.some((tab) => tab.pane === edge);
     if (hasEdge) return;
     const base = firstGroupId(dock.root);
     if (base === null) return;
-    tabs.splitAndOpenDock(activeWorkspaceId, base, edge === 'bottom' ? 'down' : 'right', edge === 'bottom' ? 'terminal' : 'files', edge);
+    useTabsStore.getState().splitAndOpenDock(activeWorkspaceId, base, edge === 'bottom' ? 'down' : 'right', edge === 'bottom' ? 'terminal' : 'files', edge);
   };
   const [sessionItems, setSessionItems] = useState<SessionListItem[]>([]);
   const [createSshOpen, setCreateSshOpen] = useState(false);
@@ -317,9 +476,7 @@ export function AppShell({
   );
   useCommandShortcuts(commands);
 
-  const inner =
-    activeWorkspaceId === null ? null : tabs.stateOf(activeWorkspaceId);
-  const activeInner = inner?.tabs.find((t) => t.id === inner.activeTabId);
+  const activeInner = activeInnerTabs?.find((tab) => tab.id === activeInnerActiveId);
   const routeSessionId =
     activeInner?.kind === "chat" ? activeInner.ref.sessionId : null;
 
@@ -407,6 +564,16 @@ export function AppShell({
     const target = useWindowStore.getState().outer.find((tab) => tab.id === id);
     if (target?.kind === 'workspace') {
       if (!(await confirmDocumentChanges(target.ref.workspaceId))) return;
+      /*
+        ★ D13 关闭确认强化：关闭含 browser tab 的工作区会**不可逆销毁** N 个页面运行时
+        （sessionStorage、JS 堆、表单、CDP target），必须让用户知情。
+        `confirmDocumentChanges` 只支持内置草稿/插件文档，不支持自定义文案，所以这一支
+        单独走一次 `window.confirm` —— 不新建对话框组件。文案见 i18n 的
+        `workspace.closeBrowserPages`（zh/en 均已登记）。
+      */
+      const browserCount = (useTabsStore.getState().byWorkspace[target.ref.workspaceId]?.tabs ?? [])
+        .filter((tab) => tab.kind === 'browser').length;
+      if (browserCount > 0 && !window.confirm(t('workspace.closeBrowserPages', { count: browserCount }))) return;
     }
     await win.close(id);
     if (target?.kind === 'workspace' && !useWindowStore.getState().outer.some((tab) => tab.id === id)) useDocumentsStore.getState().release(target.ref.workspaceId);
@@ -463,7 +630,7 @@ export function AppShell({
           <Sidebar
             auth={auth}
             workspace={workspace ?? null}
-            chatTabs={inner?.tabs.filter((t) => t.kind === "chat") ?? []}
+            chatTabs={activeInnerTabs?.filter((tab) => tab.kind === "chat") ?? []}
             sessions={sessionItems}
             activeFeature={
               activeStandaloneFeature ??
@@ -495,16 +662,26 @@ export function AppShell({
       )}
 
       <main data-theme-region="canvas" className="app-canvas flex min-w-0 flex-1 flex-col overflow-hidden rounded-panel bg-canvas">
-        {activeStandaloneFeature === "scheduled" ? (
-          <FeatureView feature="scheduled" onClose={win.closeStandaloneFeature} />
-        ) : activeStandaloneFeature === "browser" ? (
-          <BrowserFeature onClose={win.closeStandaloneFeature} />
-        ) : activeStandaloneFeature === "extensions" ? (
-          <FeatureView feature="extensions" onClose={win.closeStandaloneFeature} />
-        ) : activeStandaloneFeature === "git" ? (
-          <FeatureView feature="git" onClose={win.closeStandaloneFeature} />
-        ) : (
-          <>
+        {/*
+          ★ stage（设计 §4.2.2）：唯一被绝对定位叠层的区域。
+          <main> 仍是 flex column，不被改成 absolute 容器；基础 shell 与 standalone
+          feature 都在 stage 内叠层 —— 切换只改可见性，不卸载 resident 层。
+        */}
+        <div className="relative min-h-0 min-w-0 flex-1">
+          {/*
+            ★ 基础 shell 容器用 baseShellActive（4.2.3 / H4）：feature 外层 tab 激活时
+            baseActive=false，但外层 Tab 条必须保持可见可交互，否则用户切不回工作区。
+          */}
+          <div
+            data-theme-region="base-shell"
+            data-base-active={baseShellActive ? 'true' : 'false'}
+            aria-hidden={baseShellActive ? undefined : true}
+            inert={!baseShellActive}
+            className={cn(
+              'absolute inset-0 flex min-h-0 min-w-0 flex-col',
+              baseShellActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0'
+            )}
+          >
             {/*
           34px 的条 + `items-end` 让 30px 的 Tab 顶边正好离条顶 4px —— 这两个数是
           量出来的,不是调出来的:参考图三张都是「窗口边 8px、条 8..41、激活 Tab 12..41」。
@@ -590,23 +767,60 @@ export function AppShell({
               />
             </div>
 
-            {/*
-          内容区分成「左列 + 右栏」,底部面板只压在**左列**下面 ——
-          和编辑器类应用一致:右侧文件栏是通栏的,终端不该把它顶掉。
-        */}
-            <div data-theme-region="content" className="flex min-h-0 flex-1">
-              {activeOuter?.kind === "feature" ? (
-                <FeatureView feature={activeOuter.ref.feature} />
-              ) : workspace === undefined || activeWorkspaceId === null ? (
-                <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-fg-faint">
+            <div data-theme-region="content" className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+              {/*
+                ★ 每个工作区一个稳定槽位，key=workspaceId（transient ↔ resident 复用同一实例）。
+                隐藏方式只用 absolute inset-0 + opacity-0 + pointer-events-none + inert +
+                aria-hidden，禁止 display:none / 零尺寸 / 条件渲染移除 resident 层（4.2.5）。
+              */}
+              {stage.map((workspaceId) => (
+                <WorkspaceDockLayer
+                  key={workspaceId}
+                  workspaceId={workspaceId}
+                  active={workspaceId === visibleWorkspaceId}
+                  transient={!resident.has(workspaceId)}
+                  fallbackModelId={settings.defaultModel}
+                  fallbackModelProviderId={settings.defaultModelProviderId}
+                  maxOutputTokens={settings.maxOutputTokens}
+                />
+              ))}
+              {activeOuter?.kind === "feature" && (
+                <div className="absolute inset-0 z-20 flex min-h-0 min-w-0">
+                  <FeatureView feature={activeOuter.ref.feature} />
+                </div>
+              )}
+              {/* 水合中：骨架占位，不渲染空态文案（4.1.8 三态之二） */}
+              {hydrating && (
+                <div className="absolute inset-0 z-20 flex min-h-0 min-w-0 items-center justify-center">
+                  <div className="h-4 w-24 animate-pulse rounded bg-tint" />
+                </div>
+              )}
+              {/* 无活动工作区：空态（4.1.8 三态之一） */}
+              {showEmptyState && (
+                <div className="absolute inset-0 z-20 flex min-h-0 min-w-0 items-center justify-center text-[13px] text-fg-faint">
                   {t("app.openWorkspace")}
                 </div>
-              ) : (
-                <DockRoot workspace={workspace} fallbackModel={{ model: settings.defaultModel, modelProviderId: settings.defaultModelProviderId }} maxOutputTokens={settings.maxOutputTokens} runningSessionIds={runningSessionIds} right={rightEdge} bottom={bottomEdge} />
               )}
             </div>
-          </>
-        )}
+          </div>
+
+          {/*
+            ★ standalone feature 覆盖整个 stage（含外层 Tab 条），与当前「整块主内容被替换」
+            语义一致；容器必须是 flex min-h-0 min-w-0，以匹配 FeatureFrame 根的 flex-1。
+            workbench 保持挂载，切回后 webContentsId 不变。
+          */}
+          {activeStandaloneFeature === "scheduled" ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 min-w-0"><FeatureView feature="scheduled" onClose={win.closeStandaloneFeature} /></div>
+          ) : activeStandaloneFeature === "browser" ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 min-w-0"><BrowserFeature onClose={win.closeStandaloneFeature} /></div>
+          ) : activeStandaloneFeature === "extensions" ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 min-w-0"><FeatureView feature="extensions" onClose={win.closeStandaloneFeature} /></div>
+          ) : activeStandaloneFeature === "git" ? (
+            <div className="absolute inset-0 z-30 flex min-h-0 min-w-0"><FeatureView feature="git" onClose={win.closeStandaloneFeature} /></div>
+          ) : null}
+        </div>
+
+        {/* ★ ConnectionDialogs 保持在 stage 之外、正常流内，且不在 base shell 的 inert 容器里（4.4.3 第 1 条） */}
         <ConnectionDialogs workspace={workspace} />
       </main>
       {/*

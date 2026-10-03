@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../../lib/cn'
+import { useWorkspaceActive } from '../../shell/workspace-active'
 
 const CONTEXT_MENU_MS = 150
 
@@ -54,6 +55,7 @@ export function ContextMenu({
   const [closing, setClosing] = useState(false)
   const closingRef = useRef(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { active } = useWorkspaceActive()
 
   // Context menus are conditionally mounted by their callers, so defer the
   // caller's unmount just long enough for the panel to finish its exit.
@@ -63,6 +65,20 @@ export function ContextMenu({
     setClosing(true)
     closeTimer.current = setTimeout(onClose, CONTEXT_MENU_MS)
   }, [onClose])
+
+  // onClose 多为调用方内联箭头，close 随之每次 render 重建；若直接进依赖，失活
+  // 期间 effect 会随父级重渲染反复重跑、close 被连续调用。用 ref 持有最新 close。
+  const closeRef = useRef(close)
+  closeRef.current = close
+
+  /*
+    失活 = 正常关闭（设计 §4.7.2 / v3.1 D7）：走既有 dismiss 路径（close → 退场
+    动画 → onClose），不硬卸载。closing 置真后下面的 document keydown/pointerdown
+    监听会随 effect 清理而注销。无 Provider 时 active 恒 true，行为不变。
+  */
+  useEffect(() => {
+    if (!active) closeRef.current()
+  }, [active])
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setShown(true))

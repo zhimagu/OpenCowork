@@ -49,6 +49,7 @@ import { OpenWithMenu, OpenWithChevron } from "../../components/OpenWithMenu";
 import { useI18n } from "../../i18n";
 import { cn } from "../../lib/cn";
 import { IS_MAC } from "../../lib/platform";
+import { useWorkspaceActive } from "../../shell/workspace-active";
 import { useWindowStore } from "../../stores/window";
 
 export interface LightboxImage {
@@ -76,6 +77,11 @@ export function ImageLightbox({
   onClose: () => void;
 }): ReactNode {
   const { t } = useI18n();
+  // ★ 灯箱 workspace-owned:portaled 到 body,不受层根 inert 约束。
+  //   所在工作区失活时必须走正常关闭(keepalive v3.1 §4.7 D7),让下方主 effect
+  //   的 cleanup(Esc 监听注销、overflow 还原、焦点归还)一起发生,而不是硬卸载。
+  //   无 Provider(app 级使用)时 active 恒 true,行为不变。
+  const { active } = useWorkspaceActive();
   const [index, setIndex] = useState(startIndex);
   const closeRef = useRef<HTMLButtonElement>(null);
   /** 打开前的焦点。关闭时要还回去 */
@@ -127,6 +133,15 @@ export function ImageLightbox({
       if (el instanceof HTMLElement && document.contains(el)) el.focus();
     };
   }, [onClose, prev, next]);
+
+  // 所在工作区失活 → 走既有 onClose 正常关闭(理由见上方 active 声明处的注释)
+  // onClose 多为调用方内联箭头，引用每次 render 都变；若直接进依赖，失活期间
+  // effect 会随父级重渲染反复重跑、onClose 被连续调用。用 ref 持有最新引用。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!active) onCloseRef.current();
+  }, [active]);
 
   const current = images[index];
   if (current === undefined) return null;

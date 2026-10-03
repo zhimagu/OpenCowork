@@ -311,6 +311,14 @@ interface TabsState {
   revealTab: (workspaceId: string, tabId: string) => void
   /** 工作区关闭时销毁:Tab 表和它那些会话的转录一起放掉(正在跑的除外) */
   forget: (workspaceId: string) => void
+  /**
+   * 工作区重新回到 stage 时清掉它的 tombstone。
+   *
+   * ★ 只清 tombstone,不做别的。关闭工作区会写 tombstone 挡住晚到的水合结果,
+   * 但那个工作区可以再被打开 —— 打开时必须把这个墓碑拔掉,否则 `ensure` 永远
+   * 直接 return,重开的工作区会一直停在空态。
+   */
+  revive: (workspaceId: string) => void
 }
 
 /**
@@ -487,6 +495,16 @@ export const useTabsStore = create<TabsState>((set, get) => {
   // otherwise a background browser event could overwrite its chat tabs.
   const pendingBrowser = new Map<string, readonly BrowserTabSyncItem[]>()
 
+  /**
+   * 已关闭工作区的墓碑。`ensure` 挂在 effect 上、`loadOrSeed` 又跨了一次 IPC,
+   * 关闭与晚到的水合结果之间有真实的竞态窗口。没有这块墓碑的话,关闭 A 之后
+   * 晚到的 `getInnerTabs(A)` 会把 `byWorkspace[A]` 复活 —— outer 交集能挡住渲染,
+   * 但「关闭工作区 = 退出内存」的语义已经失败。
+   *
+   * 重新打开工作区(`window.ts` 的 `openWorkspace`)时由 `revive` 拔掉。
+   */
+  const tombstones = new Set<string>()
+
   function applyPendingBrowser(workspaceId: string): void {
     const pending = pendingBrowser.get(workspaceId)
     if (pending === undefined) return
@@ -496,6 +514,9 @@ export const useTabsStore = create<TabsState>((set, get) => {
 
   async function loadOrSeed(workspaceId: string): Promise<void> {
     const snapshot = await getInnerTabs(workspaceId)
+    // 这一趟 IPC 期间工作区可能已经被关掉:墓碑命中就直接丢弃结果,
+    // 不写 byWorkspace,也不应用 pendingBrowser(应用只发生在本轮成功落地时)。
+    if (tombstones.has(workspaceId)) return
     const renamed = pendingTitles.get(workspaceId)
     const persisted = withDock({ ...snapshot, tabs: snapshot.tabs.map((tab) => {
       const title = tab.kind === 'chat' && tab.ref.sessionId !== null ? renamed?.get(tab.ref.sessionId) : undefined
@@ -677,6 +698,8 @@ export const useTabsStore = create<TabsState>((set, get) => {
     },
 
     hydrate(workspaceId, s) {
+      // 工作区已关闭:丢弃晚到的水合结果,不复活 byWorkspace。
+      if (tombstones.has(workspaceId)) return
       // Keep hydrate's object identity for callers that use it as an in-memory
       // snapshot (and let dockOf cache/normalize the derived Dock view).
       const chats = s.tabs.filter((tab) => tab.kind === 'chat')
@@ -686,12 +709,15 @@ export const useTabsStore = create<TabsState>((set, get) => {
     },
 
     ensure(workspaceId) {
+      // 已关闭的工作区:墓碑命中直接 return,不发起加载,也不进 finally。
+      if (tombstones.has(workspaceId)) return
       if (get().byWorkspace[workspaceId] !== undefined || loading.has(workspaceId)) return
       loading.add(workspaceId)
       void loadOrSeed(workspaceId)
         .catch((err: unknown) => {
           // 读不回来就当全新工作区处理 —— 空 Tab 条比一个错误提示更没得做
           console.error('[tabs] 内层 Tab 布局读取失败,按新工作区处理:', err)
+          if (tombstones.has(workspaceId)) return
           if (get().byWorkspace[workspaceId] === undefined) {
             const tab = makeTab('chat', 'main')
             write(workspaceId, {
@@ -705,6 +731,8 @@ export const useTabsStore = create<TabsState>((set, get) => {
         .finally(() => {
           loading.delete(workspaceId)
           pendingTitles.delete(workspaceId)
+          // 墓碑命中说明本轮结果已被丢弃,pending 不能在这里被消费。
+          if (tombstones.has(workspaceId)) return
           applyPendingBrowser(workspaceId)
         })
     },
@@ -1260,7 +1288,16 @@ export const useTabsStore = create<TabsState>((set, get) => {
       const next = { ...get().byWorkspace }
       delete next[workspaceId]
       dockCache.delete(workspaceId)
+      // 关闭即注销:清掉在途/待应用状态并写墓碑,挡住晚到的水合结果复活 byWorkspace。
+      loading.delete(workspaceId)
+      pendingBrowser.delete(workspaceId)
+      pendingTitles.delete(workspaceId)
+      tombstones.add(workspaceId)
       set({ byWorkspace: next })
+    },
+
+    revive(workspaceId) {
+      tombstones.delete(workspaceId)
     }
   }
 })

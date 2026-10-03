@@ -506,6 +506,14 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* 失活工作区层内的所有 webview 不参与命中测试（设计 §4.8.2 / v3 B2 的唯一隔离手段）。
+   由 WorkspaceDockLayer 根节点上的 data-workspace-active 驱动，无需 props 透传，
+   也无需 BrowserView 感知；同时覆盖插件 webapp 的独立 <webview> 与未来新增的 webview。
+   ★ CDP 的 Input.dispatch* 直接投递 guest、不经宿主命中测试，因此不影响 Agent 操作。 */
+[data-workspace-active='false'] webview {
+  pointer-events: none;
+}
+
 /*
   滚动条:细、无轨道背景、悬停才明显 —— 截图里滚动条几乎看不见。
 

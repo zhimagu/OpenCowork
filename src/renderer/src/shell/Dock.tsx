@@ -16,8 +16,9 @@ import { DOCK_TAB_MIME, dockDropZone, edgeHidden, groupPane, groupTabs, visibleD
 import { useTabMenu } from './tab-menu'
 import { submitTabRename } from './tab-rename-actions'
 import { usePluginsStore } from '../stores/plugins'
+import { useWorkspaceActive } from './workspace-active'
 
-export function DockRoot({ workspace, fallbackModel, maxOutputTokens, runningSessionIds, right, bottom }: { workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number; runningSessionIds: ReadonlySet<string>; right: Presence; bottom: Presence }): ReactNode {
+export function DockRoot({ workspace, fallbackModel, maxOutputTokens, right, bottom }: { workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number; right: Presence; bottom: Presence }): ReactNode {
   const dock = useTabsStore((state) => state.dockOf(workspace.id))
   /*
     ★ 结构树一律按「两面全开」投影,开关**不参与结构**。
@@ -34,14 +35,14 @@ export function DockRoot({ workspace, fallbackModel, maxOutputTokens, runningSes
   */
   const root = structural !== null && edgeHidden(structural, dock.tabs, right.shown, bottom.shown) ? null : structural
   const { t } = useI18n()
-  return <div data-dock-root className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{root ? <DockNodeView key={root.id} node={root} tabs={dock.tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} runningSessionIds={runningSessionIds} /> : <EmptyState title={t('common.empty')} />}</div>
+  return <div data-dock-root className="flex min-h-0 min-w-0 flex-1 overflow-hidden">{root ? <DockNodeView key={root.id} node={root} tabs={dock.tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} /> : <EmptyState title={t('common.empty')} />}</div>
 }
 
-function DockNodeView({ node, tabs, right, bottom, workspace, fallbackModel, maxOutputTokens, runningSessionIds }: { node: DockNode; tabs: readonly InnerTab[]; right: Presence; bottom: Presence; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number; runningSessionIds: ReadonlySet<string> }): ReactNode {
+function DockNodeView({ node, tabs, right, bottom, workspace, fallbackModel, maxOutputTokens }: { node: DockNode; tabs: readonly InnerTab[]; right: Presence; bottom: Presence; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number }): ReactNode {
   if (node.type === 'split') {
-    return <DockSplitView node={node} tabs={tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} runningSessionIds={runningSessionIds} />
+    return <DockSplitView node={node} tabs={tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} />
   }
-  return <DockGroup key={node.id} node={node} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} runningSessionIds={runningSessionIds} />
+  return <DockGroup key={node.id} node={node} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} />
 }
 
 /**
@@ -57,7 +58,7 @@ function DockNodeView({ node, tabs, right, bottom, workspace, fallbackModel, max
  * 同一条理由:否则文件面板收的过程里工具条可用宽跌破 400px,会在动画中途
  * 自己折成 `…`,UI 换了一套(那套溢出逻辑在 FilesView 的 TOOLBAR_FULL_WIDTH)。
  */
-function DockSplitView({ node, tabs, right, bottom, workspace, fallbackModel, maxOutputTokens, runningSessionIds }: { node: Extract<DockNode, { type: 'split' }>; tabs: readonly InnerTab[]; right: Presence; bottom: Presence; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number; runningSessionIds: ReadonlySet<string> }): ReactNode {
+function DockSplitView({ node, tabs, right, bottom, workspace, fallbackModel, maxOutputTokens }: { node: Extract<DockNode, { type: 'split' }>; tabs: readonly InnerTab[]; right: Presence; bottom: Presence; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number }): ReactNode {
   const horizontal = node.direction === 'horizontal'
   const stateOf = (child: DockNode): 'live' | 'ghost' | 'absent' => {
     if (edgeHidden(child, tabs, right.mounted, bottom.mounted)) return 'absent'
@@ -117,7 +118,7 @@ function DockSplitView({ node, tabs, right, bottom, workspace, fallbackModel, ma
       </div>
     </div>
   )
-  const pass = (child: DockNode): ReactNode => <DockNodeView node={child} tabs={tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} runningSessionIds={runningSessionIds} />
+  const pass = (child: DockNode): ReactNode => <DockNodeView node={child} tabs={tabs} right={right} bottom={bottom} workspace={workspace} fallbackModel={fallbackModel} maxOutputTokens={maxOutputTokens} />
   return (
     <div
       ref={gridRef}
@@ -151,7 +152,7 @@ function DockSplitView({ node, tabs, right, bottom, workspace, fallbackModel, ma
   )
 }
 
-function DockGroup({ node, workspace, fallbackModel, maxOutputTokens, runningSessionIds }: { node: Extract<DockNode, { type: 'group' }>; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number; runningSessionIds: ReadonlySet<string> }): ReactNode {
+function DockGroup({ node, workspace, fallbackModel, maxOutputTokens }: { node: Extract<DockNode, { type: 'group' }>; workspace: Workspace; fallbackModel: FallbackModel; maxOutputTokens: number }): ReactNode {
   const { t } = useI18n()
   const dock = useTabsStore((state) => state.dockOf(workspace.id))
   const tabs = groupTabs(node, dock.tabs)
@@ -163,6 +164,15 @@ function DockGroup({ node, workspace, fallbackModel, maxOutputTokens, runningSes
   const moveDock = useTabsStore((state) => state.moveDockTab)
   const reorderDock = useTabsStore((state) => state.reorderDockTab)
   const [dragZone, setDragZone] = useState<DockDropZone | null>(null)
+  /*
+    ★ 4.10 第 1 条：层失活时取消拖拽态。
+    `inert` / `pointer-events-none` 只挡**新的**命中测试；已经建立的 HTML drag
+    和 document 监听没有自动取消路径。active 变 false 时把 dragZone 清掉。
+  */
+  const { active: layerActive } = useWorkspaceActive()
+  useEffect(() => {
+    if (!layerActive) setDragZone(null)
+  }, [layerActive])
   useEffect(() => {
     if (dragZone === null) return
     const clear = (): void => setDragZone(null)
@@ -257,7 +267,6 @@ function DockGroup({ node, workspace, fallbackModel, maxOutputTokens, runningSes
         groupId={node.id}
         workspaceId={workspace.id}
         activeId={node.activeTabId}
-        runningSessionIds={runningSessionIds}
         menu={menu}
         trailing={
           <AllTabsMenu
@@ -331,9 +340,36 @@ function DockSplitter({ workspaceId, splitId, direction, ratio, style, inert = f
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const resize = useTabsStore((state) => state.resizeDock)
+  /*
+    ★ 4.10 第 1 条：层失活时释放 pointer capture。
+    `setPointerCapture` 之后，指针事件会持续投给本元素 —— `inert` /
+    `pointer-events-none` 不会自动解除它。记录本次捕获的 pointerId，
+    active 变 false 时显式 release 并把 dragging 归位。
+  */
+  const capturedPointer = useRef<number | null>(null)
+  const { active: layerActive } = useWorkspaceActive()
+  useEffect(() => {
+    if (layerActive) return
+    const pointerId = capturedPointer.current
+    if (pointerId !== null && ref.current?.hasPointerCapture(pointerId)) ref.current.releasePointerCapture(pointerId)
+    capturedPointer.current = null
+    setDragging(false)
+  }, [layerActive])
+  /*
+    ★ M3：组件卸载时再显式释放一次。浏览器虽会在元素移除时自动释放 pointer
+    capture，但上面的 effect 在 `layerActive === true` 时提前 return、不注册
+    cleanup，正好漏掉「拖拽中组件被卸载」这条路径；这里独立兜底并清空 ref。
+  */
+  useEffect(() => () => {
+    const pointerId = capturedPointer.current
+    if (pointerId !== null && ref.current?.hasPointerCapture(pointerId)) ref.current.releasePointerCapture(pointerId)
+    capturedPointer.current = null
+    setDragging(false)
+  }, [])
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     event.preventDefault()
     ref.current?.setPointerCapture(event.pointerId)
+    capturedPointer.current = event.pointerId
     setDragging(true)
   }
   const onPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
@@ -344,6 +380,7 @@ function DockSplitter({ workspaceId, splitId, direction, ratio, style, inert = f
   }
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
     if (ref.current?.hasPointerCapture(event.pointerId)) ref.current.releasePointerCapture(event.pointerId)
+    if (capturedPointer.current === event.pointerId) capturedPointer.current = null
     setDragging(false)
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {

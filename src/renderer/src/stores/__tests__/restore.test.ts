@@ -344,6 +344,8 @@ describe('useTabsStore.ensure · 内层 Tab 的冷启动', () => {
     spy.mockRestore()
 
     useTabsStore.getState().forget('w1')
+    // forget 会写 tombstone,ensure 必须直接 return;这里等价于「用户重新打开工作区」后重试
+    useTabsStore.getState().revive('w1')
     mockGetInnerTabs.mockResolvedValue({ tabs: [chatTab('a')], activeTabId: 'a' })
     useTabsStore.getState().ensure('w1')
     await settle()
@@ -377,6 +379,8 @@ describe('useWindowStore.close · 工作区退场时的释放', () => {
   })
 
   it('关闭定时任务独立模式不碰任何工作区', () => {
+    // tombstones 是 store 闭包状态,setState 不会清;清掉可能残留的墓碑保证本用例隔离
+    useTabsStore.getState().revive('w1')
     useTabsStore.getState().hydrate('w1', { tabs: [chatTab('a')], activeTabId: 'a' })
     useWindowStore.getState().openWorkspace('w1')
     useWindowStore.getState().openFeature('scheduled')

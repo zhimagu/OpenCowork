@@ -5,7 +5,9 @@ import { autoUpdater } from 'electron-updater'
 import type { UpdateInfo, UpdateProgress, UpdateState } from '../../shared/domain/update'
 import { windows } from '../window/registry'
 
-const FEED_URL = 'https://nextco.work/api/client/updates/feed/stable/'
+// 指向本机丢弃端口：连接立即被拒，自动检查静默失败，彻底断开对原作者更新源的依赖。
+// 想临时恢复检查原作者的新版本时，把这里改回 https://nextco.work/api/client/updates/feed/stable/
+const FEED_URL = 'https://127.0.0.1:9/'
 
 function currentVersion(): string {
   return typeof app?.getVersion === 'function' ? app.getVersion() : '0.0.0'

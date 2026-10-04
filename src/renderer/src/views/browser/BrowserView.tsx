@@ -64,6 +64,16 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   const setBrowser = useTabsStore((state) => state.setBrowser)
   const [url, setUrl] = useState(tab.ref.url)
   const [draft, setDraft] = useState(tab.ref.url)
+  /*
+    src 与显示地址分家(闪屏根因):此前 webview 的 `src` 直接绑显示 url,而
+    did-navigate / reconcile / `browser:changed` 广播都会回写 url —— guest 自己
+    导航后,store 的滞后旧值会把 src 拉回旧地址 = 整页重载;重载又触发导航事件
+    再回写,主文档带一次性参数的(如 OAuth 回调)二次提交就报「token 无效」,
+    两个写入方各持一个地址时形成自激循环,表现是持续闪屏。
+    `srcUrl` 只在「无 guest(src 未挂载)」时跟随 store、或用户显式提交时变化;
+    guest 存在后 src 冻结,store/广播只影响地址栏显示,再也滚不动页面。
+  */
+  const [srcUrl, setSrcUrl] = useState(tab.ref.url)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cuaIndicator, setCuaIndicator] = useState<CuaIndicator | null>(null)
@@ -123,11 +133,31 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   // 模块级 Map 以 tab.id 为键且永不自动清理；组件卸载（tab 生命周期结束）时删除，避免泄漏。
   useEffect(() => () => { audioMutedByTab.delete(tab.id) }, [tab.id])
 
+  // Tab 切换(含渲染层重载后的挂接):三个地址一起复位,guest 重建。
   useEffect(() => {
     setUrl(tab.ref.url)
     setDraft(tab.ref.url)
+    setSrcUrl(tab.ref.url)
     setError(null)
-  }, [tab.id, tab.ref.url])
+  }, [tab.id])
+
+  /*
+    同一 Tab 内 store 地址变化(页面自身导航回写、Agent 驱动导航、reconcile):
+    只跟显示/地址栏;src 仅在还没有 guest(空地址)时接管,此后冻结,
+    旧值再也滚不回已加载的页面(闪屏根因见 srcUrl 声明处注释)。
+    例外:browserId 变了 = manager 侧重建过标签,旧 guest 已作废,src 接管新地址。
+  */
+  const browserIdRef = useRef(tab.ref.browserId)
+  useEffect(() => {
+    setUrl(tab.ref.url)
+    setDraft(tab.ref.url)
+    if (browserIdRef.current !== tab.ref.browserId) {
+      browserIdRef.current = tab.ref.browserId
+      setSrcUrl(tab.ref.url)
+    } else {
+      setSrcUrl((prev) => (prev === '' ? tab.ref.url : prev))
+    }
+  }, [tab.ref.url, tab.ref.browserId])
 
   /*
     换浏览器 tab：registry 的 browser 分支不挂 key，同一渲染位会复用组件实例，ref 会跨
@@ -148,7 +178,13 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       return openBrowserTab(workspace.id, tab.ref.url, tab.title, tab.ref.profileId, tab.id)
     }).then((remote) => {
       if (!alive) return
-      setBrowser(workspace.id, tab.id, { browserId: remote.id, url: remote.url })
+      /*
+        只补 browserId,不回写 url:此 effect 触发时本地已有地址(url 非空才进这里),
+        manager 那份 url 可能滞后(页面刚自导航、navigate IPC 还在路上)。无条件写回
+        会把地址栏/显示打回旧值,叠上 src 回滚就是闪屏循环的一半(见 srcUrl 声明处)。
+        guest 的实际位置以 did-navigate 事件为准,Agent 导航也走 guest 事件同步。
+      */
+      setBrowser(workspace.id, tab.id, { browserId: remote.id })
     }).catch(() => {
       if (alive) setError(t('browser.operationFailed'))
     })
@@ -316,9 +352,26 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       }
       setUrl(href)
       setDraft(href)
-      // src={url} 变化本身会触发 webview 导航;仅当重提交同一地址(src 不变)时才显式 loadURL,
-      // 否则每次导航都会加载两遍。
-      if (href === url) await viewRef.current?.loadURL?.(href)
+      // 用户显式提交是唯一能推动页面加载的入口(store 回写不在此列,见 srcUrl 声明处)。
+      // guest 已在:loadURL 导航、src 不动(src 与 loadURL 都动 = 加载两遍);
+      // guest 尚未 attach 时 loadURL 会抛,退回改 src(guest 不在/未挂时改 src 即挂载加载);
+      // 其余失败(ERR_ABORTED 等)若 src 本就等于目标值,setSrcUrl 是空操作 ——
+      // 没有新导航就不会有后续事件复位角标(ERR_ABORTED 的 did-fail-load 被 Electron 吞掉),
+      // 必须就地复位并报错,否则重复提交同一地址会留下永久空转。
+      if (viewNode !== null) {
+        try {
+          await viewRef.current?.loadURL?.(href)
+        } catch {
+          if (href === srcUrl) {
+            setLoading(false)
+            setError(t('browser.operationFailed'))
+          } else {
+            setSrcUrl(href)
+          }
+        }
+      } else {
+        setSrcUrl(href)
+      }
     } catch {
       setLoading(false)
       setError(t('browser.operationFailed'))
@@ -373,7 +426,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       )}
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-white">
-        {url === '' ? (
+        {srcUrl === '' ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 bg-canvas text-fg-faint">
             <Globe size={34} strokeWidth={1.4} />
             <p className="text-[13px]">{t('browser.emptyTitle')}</p>
@@ -387,7 +440,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
               setViewNode(node as BrowserElement | null)
             }}
             data-browser-tab-id={tab.id}
-            src={url}
+            src={srcUrl}
             partition={browserPartition(workspace.id, tab.ref.profileId)}
             allowpopups={false}
             webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"

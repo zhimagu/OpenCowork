@@ -184,4 +184,50 @@ describe('BrowserView 地址栏跟随', () => {
     await guestNavigate(container, 'https://a.example/page2')
     expect(addressInput(container).value).toBe('https://a.example/page2')
   })
+
+  /*
+    闪屏回归(已修):src 曾绑显示 url,store 的滞后旧值(广播/reconcile 回灌)
+    把 src 滚回旧地址 = 整页重载,重载又触发导航事件再回灌,自激循环表现为持续
+    闪屏、一次性回调令牌被二次提交(「token 无效」)。现在 src 只在提交/空态接管
+    时变化,旧值回写只影响地址栏显示,页面本体不动。
+  */
+  it('S3 页面自导航后,store 用滞后旧地址回写:webview 不重挂载、src 不回滚', async () => {
+    const container = await mount()
+    await submitAddress(container, 'a.example')
+    await flush()
+    const view = container.querySelector('webview')
+    expect(view).not.toBeNull()
+    expect(view?.getAttribute('src')).toBe('https://a.example/')
+
+    await guestNavigate(container, 'https://a.example/page2')
+
+    // 模拟 browser:changed 广播带着 manager 的滞后旧 url 回写 store
+    await act(async () => { h.actions.setBrowser('ws1', 'tab-1', { url: 'https://a.example/' }) })
+    await flush()
+
+    expect(container.querySelector('webview')).toBe(view)
+    expect(view?.getAttribute('src')).toBe('https://a.example/')
+  })
+
+  /*
+    P1-1 回归:guest 已存在时重复提交同一地址走 loadURL。若 loadURL 拒绝
+    (ERR_ABORTED 等),src 又恰已是目标值,setSrcUrl 是空操作 —— 没有新导航
+    就没有后续事件复位角标,必须就地复位加载态并报错,否则静默永久空转。
+  */
+  it('S4 重复提交同一地址且 loadURL 被拒:报错并复位加载态,不静默空转', async () => {
+    const container = await mount()
+    await submitAddress(container, 'a.example')
+    await flush()
+    const view = container.querySelector('webview') as (Element & { loadURL?: (u: string) => Promise<void> }) | null
+    expect(view).not.toBeNull()
+    view!.loadURL = async () => { throw new Error('ERR_ABORTED (-3)') }
+
+    await guestNavigate(container, 'https://a.example/page2')
+    await submitAddress(container, 'a.example')
+    await flush()
+
+    // 错误横幅出现(bg-danger),加载角标(rounded-pill)不存在
+    expect(container.querySelector('[class*="bg-danger"]')).not.toBeNull()
+    expect(container.querySelector('[class*="rounded-pill"]')).toBeNull()
+  })
 })

@@ -69,6 +69,14 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   const [cuaIndicator, setCuaIndicator] = useState<CuaIndicator | null>(null)
   const viewRef = useRef<BrowserElement | null>(null)
   /*
+    webview 元素本体进状态:挂监听的 effect 必须跟着「元素何时存在」重跑。
+    渲染层重载后的空 Tab(browserId 已存在、url 为空)输入网址时走的是
+    `browserId !== undefined` 分支,tab.ref.browserId 不变 —— 若 effect 只依赖
+    store 字段,webview 后挂载时监听永远补不上,地址栏就冻结在输入值。
+    事件处理器(返回/前进/刷新/静音)仍走 viewRef,读的是点击瞬间的最新节点。
+  */
+  const [viewNode, setViewNode] = useState<BrowserElement | null>(null)
+  /*
     主文档是否已就绪（dom-ready 已到）。用于兜住 `onAttach` 的 loading 对齐：页面有挂起
     子资源时 `isLoading()` 恒为 true，若主文档早已就绪（dom-ready 已错过），effect 重跑
     时不能凭 `isLoading()` 把角标重新点亮，否则角标会再次卡死。每次新导航（onStart /
@@ -148,7 +156,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   }, [setBrowser, tab.id, tab.ref.browserId, tab.ref.profileId, tab.ref.url, tab.title, t, workspace.id])
 
   useEffect(() => {
-    const view = viewRef.current
+    const view = viewNode
     if (view === null) return
     let alive = true
 
@@ -259,7 +267,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       view.removeEventListener('did-fail-load', onFail)
       view.removeEventListener('destroyed', onDestroyed)
     }
-  }, [setBrowser, tab.id, tab.ref.browserId, workspace.id, t])
+  }, [setBrowser, tab.id, tab.ref.browserId, workspace.id, t, viewNode])
 
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | null = null
@@ -308,7 +316,9 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       }
       setUrl(href)
       setDraft(href)
-      await viewRef.current?.loadURL?.(href)
+      // src={url} 变化本身会触发 webview 导航;仅当重提交同一地址(src 不变)时才显式 loadURL,
+      // 否则每次导航都会加载两遍。
+      if (href === url) await viewRef.current?.loadURL?.(href)
     } catch {
       setLoading(false)
       setError(t('browser.operationFailed'))
@@ -374,6 +384,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
           <webview
             ref={(node) => {
               viewRef.current = node as BrowserElement | null
+              setViewNode(node as BrowserElement | null)
             }}
             data-browser-tab-id={tab.id}
             src={url}

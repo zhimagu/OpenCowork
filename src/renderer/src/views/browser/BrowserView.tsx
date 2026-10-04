@@ -68,6 +68,13 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
   const [error, setError] = useState<string | null>(null)
   const [cuaIndicator, setCuaIndicator] = useState<CuaIndicator | null>(null)
   const viewRef = useRef<BrowserElement | null>(null)
+  /*
+    主文档是否已就绪（dom-ready 已到）。用于兜住 `onAttach` 的 loading 对齐：页面有挂起
+    子资源时 `isLoading()` 恒为 true，若主文档早已就绪（dom-ready 已错过），effect 重跑
+    时不能凭 `isLoading()` 把角标重新点亮，否则角标会再次卡死。每次新导航（onStart /
+    navigate）置 false，dom-ready / did-stop-loading 置 true。
+  */
+  const domReadyRef = useRef(false)
   const { active } = useWorkspaceActive()
   // did-attach 监听闭包拿不到最新的 active，用 ref 兜住，供 attach 后对齐静音。
   const activeRef = useRef(active)
@@ -113,6 +120,14 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
     setDraft(tab.ref.url)
     setError(null)
   }, [tab.id, tab.ref.url])
+
+  /*
+    换浏览器 tab：registry 的 browser 分支不挂 key，同一渲染位会复用组件实例，ref 会跨
+    tab 保留，必须显式复位。★ 只在 `tab.id` 变化时复位——站内 hash 跳转也会改
+    `tab.ref.url`，若跟着 url 复位，会把刚由 dom-ready 置位的「已就绪」标志撤销，反而
+    让有挂起子资源的页面在下一次 effect 重跑时重新卡住。新文档的复位由 onStart 负责。
+  */
+  useEffect(() => { domReadyRef.current = false }, [tab.id])
 
   useEffect(() => {
     if (tab.ref.url === '') return
@@ -174,7 +189,9 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
         会 throw（"must be attached to the DOM"），未捕获会把整棵 React 树卸载。
       */
       try {
-        setLoading(view.isLoading?.() ?? false)
+        // 主文档已就绪时，即便 isLoading() 仍为 true（挂起子资源），也不能凭它把角标
+        // 重新点亮——否则 effect 重跑会让角标再次卡死（dom-ready 已错过、不会再来）。
+        setLoading(domReadyRef.current ? false : (view.isLoading?.() ?? false))
       } catch {
         // 理论上 attach 后不会抛；兜底保持现状，后续事件会对齐。
       }
@@ -199,8 +216,17 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       // did-navigate 只是提交。提前复位会让「子资源还挂着」的页面被当成加载完成
       // （探针 3a/3b 实证：isLoading()=true 而角标已消失）。失败由 did-fail-load 复位。
     }
-    const onStart = (): void => setLoading(true)
-    const onStop = (): void => setLoading(false)
+    const onStart = (): void => { domReadyRef.current = false; setLoading(true) }
+    const onStop = (): void => { domReadyRef.current = true; setLoading(false) }
+    /*
+      兜底复位：did-stop-loading 要等 onload（子资源全部加载完）才触发。页面主体已渲染、
+      但某个子资源（外链追踪图、头像、字体、dev server 的动态模块…）永不返回时，onload
+      永不触发，角标会一直挂着（探针实证：/hangimg 页 readyState=interactive、loadEnd=0）。
+      dom-ready（DOMContentLoaded）在主文档解析完成时触发——用户此刻已能看到界面，正是
+      「加载完了」的语义。解析阻塞型挂起（<script> 永不返回）dom-ready 也不触发，此时
+      角标继续挂，与 Chrome 一致。
+    */
+    const onDomReady = (): void => { domReadyRef.current = true; setLoading(false) }
     const onFail = (): void => {
       setLoading(false)
       setError(t('browser.loadFailed'))
@@ -218,6 +244,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
     view.addEventListener('did-navigate-in-page', onNavigate)
     view.addEventListener('did-start-loading', onStart)
     view.addEventListener('did-stop-loading', onStop)
+    view.addEventListener('dom-ready', onDomReady)
     view.addEventListener('did-fail-load', onFail)
     view.addEventListener('destroyed', onDestroyed)
     onAttach()
@@ -228,6 +255,7 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       view.removeEventListener('did-navigate-in-page', onNavigate)
       view.removeEventListener('did-start-loading', onStart)
       view.removeEventListener('did-stop-loading', onStop)
+      view.removeEventListener('dom-ready', onDomReady)
       view.removeEventListener('did-fail-load', onFail)
       view.removeEventListener('destroyed', onDestroyed)
     }
@@ -267,6 +295,8 @@ function LocalBrowserView({ tab, workspace }: { tab: Extract<InnerTab, { kind: '
       return
     }
     setError(null)
+    // 新导航：就绪标志复位，直到新文档 dom-ready / did-stop-loading 再置回。
+    domReadyRef.current = false
     setLoading(true)
     try {
       if (tab.ref.browserId === undefined) {

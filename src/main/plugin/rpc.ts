@@ -148,7 +148,7 @@ export async function invokeCapability<M extends PluginMethod>(
 ): Promise<CapabilityOutcome> {
   switch (method) {
     case 'env.appInfo':
-      return { data: { appName: 'NextCoWork', appVersion: appVersion(), language: 'zh-CN' }, summary: 'appInfo' }
+      return { data: { appName: 'Zhimagu CoWork', appVersion: appVersion(), language: 'zh-CN' }, summary: 'appInfo' }
 
     case 'env.openExternal': {
       const p = params as PluginParams<'env.openExternal'>

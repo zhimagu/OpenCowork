@@ -19,7 +19,7 @@ export function WelcomeView({ onComplete }: { onComplete: () => void }): ReactNo
       <div className="relative flex w-[360px] flex-col items-center px-6 text-center">
         <div className="mb-5 flex items-center gap-3 text-[32px] font-semibold tracking-[-0.04em]">
           <Mark size={38} className="text-white" />
-          <span>NextCoWork</span>
+          <span>Zhimagu CoWork</span>
         </div>
         <p className="mb-9 text-[14px] text-white/45">{t('auth.tagline')}</p>
         <button type="button" disabled={busy} onClick={() => void login()} className="group flex h-11 w-full items-center justify-center gap-2 rounded-full bg-accent text-[14px] font-medium text-accent-fg transition hover:brightness-110 disabled:opacity-60">

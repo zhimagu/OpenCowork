@@ -42,7 +42,7 @@ export async function syncRequest<T>(context: SyncRequestContext, path: string, 
   const token = await context.host.secrets.get('nextcowork:client-access-token')
   context.assertCurrent()
   if (!token) throw new ConfigSyncError('signedOut')
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'User-Agent': 'NextCoWork/desktop', Accept: 'application/json' }
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}`, 'User-Agent': 'ZhimaguCoWork/desktop', Accept: 'application/json' }
   if (deviceAuth) {
     const vault = context.vault
     if (vault === null || vault.accountId !== context.accountId || !context.deviceToken) throw new ConfigSyncError('locked')

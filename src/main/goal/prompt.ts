@@ -76,7 +76,7 @@ export interface BackgroundTaskLine {
 /** 空闲唤醒到顶时追加的两句（CC 原文，产品自称已替换）。 */
 const IDLE_SUMMARY_SUFFIX = ' · idle check-ins paused until your next message'
 const IDLE_BODY_SUFFIX =
-  " NextCoWork won't wake this session for another check-in until the user sends a message, so say clearly where things stand."
+  " Zhimagu CoWork won't wake this session for another check-in until the user sends a message, so say clearly where things stand."
 
 /**
  * 后台推迟的 check-in 正文。

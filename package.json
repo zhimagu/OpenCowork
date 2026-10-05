@@ -1,9 +1,9 @@
 {
-  "name": "nextcowork",
+  "name": "zhimagu-cowork",
   "version": "2.5.3",
-  "description": "NextCoWork — 编码型 Agent 桌面端",
+  "description": "Zhimagu CoWork — 编码型 Agent 桌面端",
   "main": "./out/main/index.js",
-  "author": "NextCoWork",
+  "author": "Zhimagu",
   "license": "Apache-2.0",
   "private": true,
   "engines": {

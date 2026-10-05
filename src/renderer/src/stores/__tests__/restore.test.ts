@@ -373,11 +373,11 @@ describe('专注会话窗口 · 精简界面', () => {
     expect(html).toContain('最近对话')
     expect(html).toContain('aria-label="搜索"')
     expect(html).toContain('aria-label="新建对话"')
-    for (const label of ['NextCoWork', '定时任务', '浏览器', '扩展', 'aria-label="设置"']) expect(html).not.toContain(label)
+    for (const label of ['Zhimagu CoWork', '定时任务', '浏览器', '扩展', 'aria-label="设置"']) expect(html).not.toContain(label)
 
     const main = renderSidebar(false)
     expect(main).toContain('w-[297px]')
-    expect(main).toContain('NextCoWork')
+    expect(main).toContain('Zhimagu CoWork')
     expect(main).toContain('定时任务')
     expect(main).toContain('浏览器')
   })

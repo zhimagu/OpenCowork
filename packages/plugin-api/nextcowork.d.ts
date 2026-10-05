@@ -1,5 +1,5 @@
 /**
- * `nextcowork` —— NextCoWork 插件 API。
+ * `nextcowork` —— Zhimagu CoWork 插件 API。
  *
  * 作者侧的用法与 VS Code 完全一致:
  *

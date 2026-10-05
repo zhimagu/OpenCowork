@@ -241,7 +241,7 @@ function estimateToolBuckets(tools: readonly ToolInfo[]): {
   ★ 这里刻意写「task list」而不是工具名 —— 理由同上面第 3 关:路由逻辑跟着工具走,
   工具不在快照里时,这段字也不该指着一个模型拿不到的名字。
 */
-const BASE_PROMPT = `You are the coding assistant in NextCoWork, a desktop app running on the user's own machine.
+const BASE_PROMPT = `You are the coding assistant in Zhimagu CoWork, a desktop app running on the user's own machine.
 
 # Tone and style
 - Be concise. Keep prose under 4 lines unless the user asks for detail or the task genuinely needs more. Code, diffs, and tool output do not count toward that.

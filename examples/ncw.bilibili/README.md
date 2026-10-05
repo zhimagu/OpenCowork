@@ -1,7 +1,7 @@
 # ncw.bilibili —— 零代码网页应用示例
 
 **这个包里没有一行 JavaScript。** 它存在的意义就是证明这句话:把一个网站带进
-NextCoWork,不应该要求作者先学会写 `activate()`、打包一个单文件 ESM、
+Zhimagu CoWork,不应该要求作者先学会写 `activate()`、打包一个单文件 ESM、
 再让宿主为它常驻一个隐藏进程。
 
 ## 它长什么样

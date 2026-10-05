@@ -48,7 +48,7 @@ export async function importProviders(req: { password?: string }): Promise<{ pat
   let value: unknown
   try { value = JSON.parse(readFileSync(path, 'utf8')) } catch { throw new Error('导入文件不是有效 JSON') }
   if (!isProviderExport(value) || value.version > PROVIDER_EXPORT_VERSION) throw new Error('导入文件格式或版本不受支持')
-  if (value.providers.some((provider) => provider.id === CLIENT_PROVIDER_ID)) throw new Error('不能导入 NextCoWork 内置提供商')
+  if (value.providers.some((provider) => provider.id === CLIENT_PROVIDER_ID)) throw new Error('不能导入 Zhimagu CoWork 内置提供商')
 
   let credentials: Record<string, string> = {}
   if (value.encryptedCredentials !== undefined) {

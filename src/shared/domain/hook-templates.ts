@@ -87,7 +87,7 @@ if blocked or "/.ssh/" in p or "/.aws/" in p or "/.gnupg/" in p:
     timeoutSeconds: 10,
     platform: 'darwin',
     // `|| true`：通知权限被拒时 osascript 会非零退出，而那不该记成钩子失败。
-    command: `osascript -e 'display notification "一轮运行结束" with title "NextCoWork"' 2>/dev/null || true`
+    command: `osascript -e 'display notification "一轮运行结束" with title "Zhimagu CoWork"' 2>/dev/null || true`
   },
   {
     id: 'inject-branch',

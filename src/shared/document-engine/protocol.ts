@@ -3,7 +3,7 @@
  *
  * ## 为了什么需求建的
  *
- * 办公插件(Word / Excel / PowerPoint / PDF)要在 NextCoWork 里做到「编辑器画布和
+ * 办公插件(Word / Excel / PowerPoint / PDF)要在 Zhimagu CoWork 里做到「编辑器画布和
  * Agent 工具操作**同一个活动文档模型**」。现有 `ncw:doc:*` 文档通道只能搬运一整份
  * 文本或图片(见 `shell/PluginViewFrame.tsx`),对 OOXML / PDF 只会送空串 ——
  * 拿它改办公文件只能「整文件覆盖」,而那会把用户还没保存的输入、选区、撤销栈

@@ -3,7 +3,7 @@
  *
  * ## 为了什么需求建的
  *
- * 用户要在 NextCoWork 里像 WPS 一样直接看、改 Word 文档,并且与 Agent 改的是同一份活动模型
+ * 用户要在 Zhimagu CoWork 里像 WPS 一样直接看、改 Word 文档,并且与 Agent 改的是同一份活动模型
  * (计划 §1、§7)。画布由宿主的 `DocumentCanvas` 提供;这里做产品界面:标题栏(保存、状态、
  * 缩放)与功能区(`ribbon.tsx`)。
  *

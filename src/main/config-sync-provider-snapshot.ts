@@ -7,7 +7,7 @@
  *
  * ★ `credentialRef` 仍不上传。云端 map 的键是 provider id;落到另一台设备时
  *   始终用 `providerCredentialRef(id)` 重新派生本机引用,防止远端让 A 指向 B 的密钥。
- * ★ NextCoWork 内置 provider 不参与。它的 credentialRef 指向当前设备登录 JWT,
+ * ★ Zhimagu CoWork 内置 provider 不参与。它的 credentialRef 指向当前设备登录 JWT,
  *   同步出去既会复制登录身份,也会让另一台设备绕过自己的 OAuth 登录。
  */
 import type { ModelAlias, UpstreamProvider } from '../shared/domain/provider'

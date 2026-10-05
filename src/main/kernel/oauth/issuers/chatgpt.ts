@@ -23,7 +23,7 @@ const ORIGINATOR = 'codex_cli_rs'
 
 /**
  * 需求:codex 这条线的**出站请求要自报成 Codex CLI**,UA 与 originator 同族 ——
- * 在这之前业务请求发的是 `NextCoWork/<版本> (darwin; arm64)`,与 originator 自相矛盾。
+ * 在这之前业务请求发的是 `ZhimaguCoWork/<版本> (darwin; arm64)`,与 originator 自相矛盾。
  *
  * 实测依据(2026-09-27):npm `latest` 的 `@openai/codex` 是 **0.157.1** ——
  * 从 registry 拉了 `0.157.1-darwin-arm64` 平台包,二进制里留有同族的
@@ -134,7 +134,7 @@ function transport(cred: OAuthCredential, ctx: TransportContext): UpstreamTransp
       'chatgpt-account-id': cred.accountId,
       'openai-beta': 'responses=experimental',
       originator: ORIGINATOR,
-      // ★ 与 originator 同族;写在这里才会压过 router.ts 那行通用的 NextCoWork UA
+      // ★ 与 originator 同族;写在这里才会压过 router.ts 那行通用的 ZhimaguCoWork UA
       'user-agent': CODEX_USER_AGENT,
       session_id: sessionUuid(ctx.sessionId)
     },

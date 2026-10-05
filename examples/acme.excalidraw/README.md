@@ -1,6 +1,6 @@
 # acme.excalidraw
 
-NextCoWork 的 Excalidraw 白板插件 —— **纯第三方插件**,不走任何内置路径。
+Zhimagu CoWork 的 Excalidraw 白板插件 —— **纯第三方插件**,不走任何内置路径。
 
 ```
 「+」菜单 → 新建绘图
@@ -17,7 +17,7 @@ npm install
 npm run package          # → acme.excalidraw-0.1.0.zip
 ```
 
-在 NextCoWork 里:**扩展 › 插件 › 安装插件**,选那个 ZIP(或直接选这个目录)。
+在 Zhimagu CoWork 里:**扩展 › 插件 › 安装插件**,选那个 ZIP(或直接选这个目录)。
 启用时会要求批准 `workspace.read` 与 `workspace.write` —— 它要读写你画的那些文件。
 
 开发时用 `npm run build` 后选**目录**安装,改完重新点一次启用即可。

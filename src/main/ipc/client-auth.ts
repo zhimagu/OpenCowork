@@ -19,7 +19,7 @@ import {
 } from '../db/config-profile'
 
 /**
- * 哪些模型在 NextCoWork 内置渠道下固定走 anthropic 协议,而不是继承该供应商的
+ * 哪些模型在 Zhimagu CoWork 内置渠道下固定走 anthropic 协议,而不是继承该供应商的
  * 出厂协议(Responses)。
  *
  * ★★ **anthropic 系(claude)这一支不在这里判,走共享的厂商默认协议表**
@@ -69,11 +69,11 @@ function callbackPage(success: boolean): string {
   const title = success ? '登录成功' : '登录未完成'
   const heading = success ? '欢迎回来' : '登录没有完成'
   const detail = success
-    ? '你的 NextCoWork 桌面客户端已经连接到账户。现在可以返回应用继续使用。'
-    : '授权没有完成，请关闭此页面并回到 NextCoWork 重试。'
+    ? '你的 Zhimagu CoWork 桌面客户端已经连接到账户。现在可以返回应用继续使用。'
+    : '授权没有完成，请关闭此页面并回到 Zhimagu CoWork 重试。'
   const icon = success ? '✓' : '!'
   const tone = success ? '#78e0a7' : '#f3b36a'
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>${title} · NextCoWork</title><style>
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><title>${title} · Zhimagu CoWork</title><style>
     :root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;color:#f4f7f5;background:#151817}
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;overflow:hidden;background:radial-gradient(ellipse 70% 55% at 50% 25%,#254236 0%,#1a2420 42%,#151817 78%)}
     .orb{position:fixed;width:420px;height:420px;border:1px solid rgba(120,224,167,.11);border-radius:50%;box-shadow:0 0 0 42px rgba(120,224,167,.025),0 0 0 84px rgba(120,224,167,.018);top:-205px;left:50%;transform:translateX(-50%)}
@@ -81,7 +81,7 @@ function callbackPage(success: boolean): string {
     .mark{width:58px;height:58px;margin:0 auto 24px;display:grid;place-items:center;border-radius:18px;background:linear-gradient(145deg,#91efbb,#42b978);color:#10251a;font-size:31px;font-weight:700;box-shadow:0 10px 28px rgba(65,190,123,.24)}
     h1{margin:0;font-size:25px;letter-spacing:-.03em;font-weight:650}p{margin:13px 0 0;color:rgba(244,247,245,.58);font-size:14px;line-height:1.7}.status{margin-top:27px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.055);color:${tone};font-size:12px}.back{display:inline-block;margin-top:27px;color:#78e0a7;font-size:13px;text-decoration:none}.back:hover{text-decoration:underline}.foot{margin-top:25px;color:rgba(244,247,245,.3);font-size:11px}
     @media(prefers-reduced-motion:no-preference){.card{animation:rise .45s cubic-bezier(.2,.8,.2,1)}.mark{animation:pop .55s .12s both cubic-bezier(.2,.9,.2,1)}@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes pop{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}}
-  </style></head><body><div class="orb" aria-hidden="true"></div><main class="card"><div class="mark" aria-hidden="true">${icon}</div><h1>${heading}</h1><p>${detail}</p><div class="status">${success ? '账户已安全连接 · 可以关闭浏览器窗口' : '没有任何账户信息被发送到此页面'}</div><a class="back" href="https://nextco.work/">返回 NextCoWork</a><div class="foot">NextCoWork · 你的工作空间</div></main><script>setTimeout(()=>{if(window.opener)window.close()},1200)</script></body></html>`
+  </style></head><body><div class="orb" aria-hidden="true"></div><main class="card"><div class="mark" aria-hidden="true">${icon}</div><h1>${heading}</h1><p>${detail}</p><div class="status">${success ? '账户已安全连接 · 可以关闭浏览器窗口' : '没有任何账户信息被发送到此页面'}</div><a class="back" href="https://nextco.work/">返回 Zhimagu CoWork</a><div class="foot">Zhimagu CoWork · 你的工作空间</div></main><script>setTimeout(()=>{if(window.opener)window.close()},1200)</script></body></html>`
 }
 
 function announce(next: ClientAuthState): ClientAuthState {
@@ -219,7 +219,7 @@ const RESPONSES_DEFAULT_KEY = 'client-auth.responses-default'
 function ensureClientProvider(): void {
   const identity = {
     id: CLIENT_PROVIDER_ID,
-    name: 'NextCoWork',
+    name: 'Zhimagu CoWork',
     baseUrl: `${API_ROOT}/v1`,
     credentialRef: ACCESS_REF
   } as const
@@ -346,7 +346,7 @@ async function syncClientModels(access: string): Promise<void> {
         ★★ 需求:登录灌进来的**生图模型必须带上 image 模态**,否则「图片生成」页
         (`ImageModelPage` 按 `modality === 'image' || imageOutput` 过滤)看不见它 ——
         平台的 `/v1/models` 不报 modality,目录又只认得已收录的 ID,新上架/预览期的
-        图片模型两边都落空,表现是设置页里那家 NextCoWork 只有文本模型,零报错。
+        图片模型两边都落空,表现是设置页里那家 Zhimagu CoWork 只有文本模型,零报错。
 
         判据两路取或:平台显式标了 imageOutput,或 ID 命中共享的图片模型启发式
         (`isImageModelId`,和图片页「拉取模型列表」的过滤是同一条,别在这写第二份)。

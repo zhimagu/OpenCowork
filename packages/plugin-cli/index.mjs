@@ -254,7 +254,7 @@ async function ensurePlugin(token, pkg) {
 
 async function dev() {
   await build({ watch: true })
-  console.log('提示:在 NextCoWork 的「扩展 › 插件」里用「安装插件」选择这个目录,改完重新点一次启用即可生效。')
+  console.log('提示:在 Zhimagu CoWork 的「扩展 › 插件」里用「安装插件」选择这个目录,改完重新点一次启用即可生效。')
 }
 
 function run(cmd, args) {

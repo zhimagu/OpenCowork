@@ -67,7 +67,7 @@ async function main() {
   const publisher = flag('publisher') ?? (await ask(rl, 'publisher(你的发布者名,小写字母数字与连字符)', 'acme'))
   const name = flag('name') ?? (await ask(rl, 'name(插件名)', 'hello'))
   const displayName = flag('display-name') ?? (await ask(rl, '显示名', 'Hello'))
-  const description = flag('description') ?? (await ask(rl, '一句话描述', 'A NextCoWork plugin'))
+  const description = flag('description') ?? (await ask(rl, '一句话描述', 'A Zhimagu CoWork plugin'))
   rl?.close()
 
   if (!NAME_RE.test(publisher) || !NAME_RE.test(name)) {
@@ -154,7 +154,7 @@ async function main() {
   npm run build
   npm run package
 
-然后在 NextCoWork 的「扩展 › 插件 › 安装插件」里选那个目录(或 ZIP)。
+然后在 Zhimagu CoWork 的「扩展 › 插件 › 安装插件」里选那个目录(或 ZIP)。
 改代码时用 npm run dev,它会监听 src/。${wantsView ? `
 
 视图在 view/editor.tsx,用的是宿主下发的 React 与控件(\`nextcowork/ui\`)——

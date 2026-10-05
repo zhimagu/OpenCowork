@@ -1,8 +1,8 @@
-# NextCoWork
+# Zhimagu CoWork
 
 **编码型 Agent 的桌面工作台。**
 
-NextCoWork 把 Agent 驱动的开发带到桌面端：多工作区并排开、一套完整工作台（编辑器、终端、Git、浏览器），以及一个权限模型真正可信的 Agent 内核 —— 全部收在一个原生应用里，支持 macOS、Windows 和 Linux。
+Zhimagu CoWork 把 Agent 驱动的开发带到桌面端：多工作区并排开、一套完整工作台（编辑器、终端、Git、浏览器），以及一个权限模型真正可信的 Agent 内核 —— 全部收在一个原生应用里，支持 macOS、Windows 和 Linux。
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 

@@ -1,8 +1,8 @@
-# NextCoWork
+# Zhimagu CoWork
 
 **A desktop workspace for coding agents.**
 
-NextCoWork brings agent-driven development to the desktop: multiple workspaces side by side, a full workbench (editor, terminal, Git, browser), and an agent kernel with a permission model you can actually trust — all in one native app for macOS, Windows and Linux.
+Zhimagu CoWork brings agent-driven development to the desktop: multiple workspaces side by side, a full workbench (editor, terminal, Git, browser), and an agent kernel with a permission model you can actually trust — all in one native app for macOS, Windows and Linux.
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 

@@ -76,8 +76,8 @@ function page(title: string, detail: string, accent: string): string {
 </div></body></html>`
 }
 
-const OK_PAGE = page('已授权', '可以关掉这个标签页，回到 NextCoWork 了。', '#5aa469')
-const FAIL_PAGE = page('授权未完成', '请回到 NextCoWork 重试。', '#c9705a')
+const OK_PAGE = page('已授权', '可以关掉这个标签页，回到 Zhimagu CoWork 了。', '#5aa469')
+const FAIL_PAGE = page('授权未完成', '请回到 Zhimagu CoWork 重试。', '#c9705a')
 
 function listenOn(server: Server, port: number, host: string): Promise<number> {
   return new Promise((resolve, reject) => {

@@ -59,7 +59,7 @@ export function ImageModelPage({ settings, patch }: Pick<SettingsPageProps, "set
       "",
     ).filter((entry) => entry.aliases.length > 0);
     /*
-      需求:登录后 NextCoWork 内置提供商要**像文本页一样常驻左列**,哪怕它此刻
+      需求:登录后 Zhimagu CoWork 内置提供商要**像文本页一样常驻左列**,哪怕它此刻
       一条图片别名都没有(老用户登录同步跑在本功能之前、或平台列表暂时没有图片模型)。
 
       不这样做的死循环:它没有图片别名 → 不进左列 → 打不开它的面板 → 面板里那颗

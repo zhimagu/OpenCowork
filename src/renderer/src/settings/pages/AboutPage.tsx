@@ -43,7 +43,7 @@ export function AboutPage({ versions }: { versions: Bootstrap['versions'] }): Re
   return (
     <SettingGroup>
       <SettingRow
-        title="NextCoWork"
+        title="Zhimagu CoWork"
         description={t('about.description')}
       />
       <SettingRow title={t('about.updates.title')} description={t('about.updates.description')}>

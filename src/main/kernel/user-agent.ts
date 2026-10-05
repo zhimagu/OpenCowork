@@ -1,8 +1,8 @@
 /**
  * 出站请求的 User-Agent —— **应用自报家门的那一行。**
  *
- * 形状是 `NextCoWork/0.1.1 (darwin; arm64)`:一个纯应用标识,不伪装成浏览器。
- * 不写它的话,Electron 会自己拼一个默认值,里面是 `nextcowork/0.1.1` 混着
+ * 形状是 `ZhimaguCoWork/0.1.1 (darwin; arm64)`:一个纯应用标识,不伪装成浏览器。
+ * 不写它的话,Electron 会自己拼一个默认值,里面是 `zhimagu-cowork/0.1.1` 混着
  * `Chrome/…` 和 `Electron/…`(小写的应用名来自 package.json 的 `name`)。
  *
  * ★ **只装在「我们自己发的 API 请求」上**:模型上游(`upstream/router.ts`)、
@@ -41,9 +41,9 @@ const UNINSTALLED = 'unknown'
 
 let appVersion = UNINSTALLED
 
-/** `NextCoWork/0.1.1 (darwin; arm64)` */
+/** `ZhimaguCoWork/0.1.1 (darwin; arm64)` */
 export function userAgent(): string {
-  return `NextCoWork/${appVersion} (${process.platform}; ${process.arch})`
+  return `ZhimaguCoWork/${appVersion} (${process.platform}; ${process.arch})`
 }
 
 /**

@@ -1,7 +1,7 @@
 import markUrl from '../../../../../resources/trayTemplate.png'
 
 /**
- * NextCoWork 的标识。
+ * Zhimagu CoWork 的标识。
  *
  * 图形使用应用现有的托盘模板资源 `resources/trayTemplate.png`。
  * 这里不直接 `<img>` —— 位图本身是固定黑色,贴到深色侧边栏会看不见。
@@ -14,7 +14,7 @@ export function Mark({ size = 26, className }: { size?: number; className?: stri
   return (
     <span
       role="img"
-      aria-label="NextCoWork"
+      aria-label="Zhimagu CoWork"
       className={className}
       style={{
         display: 'inline-block',

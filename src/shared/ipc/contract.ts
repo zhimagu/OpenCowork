@@ -4,7 +4,7 @@
  * `docs/ipc-protocol.md` 的三条约定照单全收:三原语语义严格区分、`模块:动作` 冒号命名、
  * 所有 `on*` 必须返回退订函数。四处收紧:
  *
- * | 协议文档 | NextCoWork |
+ * | 协议文档 | Zhimagu CoWork |
  * |---|---|
  * | §5.2 两种返回风格「模块内保持一致」 | **只用一种** —— IpcResult 信封,全局一致 |
  * | §5.3 靠异常穿过 handle 传播 | **异常绝不穿过 handle** |
@@ -288,7 +288,7 @@ export interface IpcInvokeMap {
   'app:saveImageFile': { req: { defaultName: string; base64: string }; res: { path: string } | null }
   'app:openSessionWindow': { req: { workspaceId: string; sessionId: string }; res: void }
 
-  // ── NextCoWork 账户 ──
+  // ── Zhimagu CoWork 账户 ──
   'clientAuth:getState': { req: void; res: ClientAuthState }
   'clientAuth:startLogin': { req: void; res: ClientAuthState }
   'clientAuth:selectTeam': { req: { teamId: string }; res: ClientAuthState }
@@ -1137,7 +1137,7 @@ export interface IpcInvokeMap {
   // ── 从其他 AI 应用导入(设置 › 导入) ──
   /*
     ★ 频道名是 `imports:*`(复数),而上面「数据」页那三条是 `storage:import*` ——
-    两者是**两个功能**:那边导入的是 NextCoWork 自己的整库备份,这边是外部来源。
+    两者是**两个功能**:那边导入的是 Zhimagu CoWork 自己的整库备份,这边是外部来源。
     共用前缀的话,下一个人接手时得先读实现才知道哪个是哪个,而 `storage:importApply`
     会合并全套设置、按时间戳覆盖,误用一次的代价是用户配置被一份外部数据盖掉。
 

@@ -1,7 +1,7 @@
 {
   "name": "create-nextcowork-plugin",
   "version": "0.2.0",
-  "description": "Scaffold a NextCoWork plugin that is already publishable.",
+  "description": "Scaffold a Zhimagu CoWork plugin that is already publishable.",
   "license": "MIT",
   "type": "module",
   "bin": { "create-nextcowork-plugin": "./index.mjs" },

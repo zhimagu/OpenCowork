@@ -749,7 +749,7 @@ describe('UpstreamRouter · 正常路径', () => {
     expect(headers[0]).toMatchObject({ 'x-api-key': 'sk-test', 'anthropic-version': '2023-06-01' })
     expect(headers[0]?.authorization).toBeUndefined()
     // 自报家门(kernel/user-agent.ts)——漏了不会报错,只是请求匿名发出去
-    expect(headers[0]?.['user-agent']).toMatch(/^NextCoWork\//)
+    expect(headers[0]?.['user-agent']).toMatch(/^ZhimaguCoWork\//)
     // ★ 别家供应商不该多出 OpenCode 那个会话头
     expect(headers[0]?.['x-opencode-session']).toBeUndefined()
   })
@@ -768,7 +768,7 @@ describe('UpstreamRouter · 正常路径', () => {
     await drainWithContext(router, { workspaceId: 'ws-test', sessionId: '01JSESSION' })
     expect(headers[0]?.['x-opencode-session']).toBe(sessionUuid('01JSESSION'))
     // 自定义 UA 是同一份文档里的第二条准入要求,和这个头一起构成准入条件
-    expect(headers[0]?.['user-agent']).toMatch(/^NextCoWork\//)
+    expect(headers[0]?.['user-agent']).toMatch(/^ZhimaguCoWork\//)
   })
 
   /**

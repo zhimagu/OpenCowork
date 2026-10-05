@@ -130,7 +130,7 @@ export function buildInvitePosterSvg(input: InvitePosterInput): string {
 <circle cx="1520" cy="230" r="480" stroke-width="0.8"/>
 </g>
 <rect x="0" y="0" width="14" height="${POSTER_HEIGHT}" fill="#36d285"/>
-<text x="240" y="160" font-family="${FONT}" font-size="40" font-weight="600" fill="#f4efe9" letter-spacing="1">NextCoWork</text>
+<text x="240" y="160" font-family="${FONT}" font-size="40" font-weight="600" fill="#f4efe9" letter-spacing="1">Zhimagu CoWork</text>
 <text x="240" y="196" font-family="${FONT}" font-size="22" fill="#5a8a72">${esc(copy.tagline)}</text>
 <text x="120" y="330" font-family="${FONT}" font-size="30" fill="#36d285" letter-spacing="4">${esc(copy.eyebrow)}</text>
 <text x="120" y="450" font-family="${FONT}" font-size="104" font-weight="700" fill="#f4efe9" letter-spacing="2">${esc(copy.titleLine1)}</text>
@@ -170,5 +170,5 @@ ${bullets.map((line, index) => {
 /** 另存时的文件名建议。带上邀请码，批量生成/收集时一眼看得出是谁那张。 */
 export function invitePosterFileName(code: string): string {
   const safe = code.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24)
-  return safe === '' ? 'nextcowork-invite.png' : `nextcowork-invite-${safe}.png`
+  return safe === '' ? 'zhimagu-cowork-invite.png' : `zhimagu-cowork-invite-${safe}.png`
 }

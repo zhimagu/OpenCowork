@@ -90,7 +90,7 @@ const api = {
   }
 } as const
 
-export type NextCoWorkApi = typeof api
+export type ZhimaguCoWorkApi = typeof api
 
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld('nextcowork', api)

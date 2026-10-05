@@ -1028,7 +1028,7 @@ app.on('window-all-closed', () => {
 })
 
 /*
-  ★ **整个退出流程唯一的入口。** `Cmd+Q`、托盘「退出 NextCoWork」、`app.quit()`,
+  ★ **整个退出流程唯一的入口。** `Cmd+Q`、托盘「退出 Zhimagu CoWork」、`app.quit()`,
   以及上面非 macOS 的那次调用,全都先落到这个事件上 —— 不再有第二条分叉路径。
 
   `preventDefault()` 在这里的作用不是「拦住退出」,而是**把退出推迟到窗口关完

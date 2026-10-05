@@ -145,7 +145,7 @@ export interface PluginCatalog {
    * 这个宿主实现的**插件 API 版本** —— `engines.nextcowork` 比的是它,不是 `hostVersion`。
    *
    * ★ 两者分开的理由见 `shared/plugin/api-version.ts`:应用版本回答「用户装的是哪一版
-   * NextCoWork」(市场灰度按它走),API 版本回答「`nextcowork` 模块的形状是哪一版」。
+   * Zhimagu CoWork」(市场灰度按它走),API 版本回答「`nextcowork` 模块的形状是哪一版」。
    * 合成一个的后果是按官方模板写的插件全部被判装载失败。
    *
    * 可选:旧的持久化/旧窗口拿不到这个字段时不显示,而不是显示成 `undefined`。

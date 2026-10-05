@@ -1,11 +1,11 @@
 ---
 name: skills-creator
-description: Create, install, validate, update, and diagnose NextCoWork Skills. Use when authoring a SKILL.md package, installing a global or workspace Skill, packaging a Skill ZIP, or fixing Skill discovery, activation, or diagnostics.
+description: Create, install, validate, update, and diagnose Zhimagu CoWork Skills. Use when authoring a SKILL.md package, installing a global or workspace Skill, packaging a Skill ZIP, or fixing Skill discovery, activation, or diagnostics.
 ---
 
-# NextCoWork Skill Creator
+# Zhimagu CoWork Skill Creator
 
-Create Skills as small, portable workflow packages that extend the NextCoWork agent. Keep the package self-contained, deterministic where possible, safe to install, and easy to discover from the desktop Skills view.
+Create Skills as small, portable workflow packages that extend the Zhimagu CoWork agent. Keep the package self-contained, deterministic where possible, safe to install, and easy to discover from the desktop Skills view.
 
 ## Use this Skill when
 
@@ -20,7 +20,7 @@ Create Skills as small, portable workflow packages that extend the NextCoWork ag
 
 Use the application's global Skill root, `<appData>/skills`, resolved from `getHost().paths.userData()`. In development this is `<app working directory>/.next-cowork/skills`; packaged builds use the application's per-user data directory. Do not assume that app data lives in the user's home directory. Treat `<workspace>/.next-cowork/skills` as the workspace-local root when a workflow must be isolated to one project. Keep global Skills available across workspaces; keep workspace-local Skills available only to the owning workspace.
 
-Bundled Skills live in the NextCoWork repository at `resources/skills/<skill-name>/SKILL.md`. On application startup, each bundled Skill is installed into the global Skill root and **refreshed on every launch** — the previously bundled copy is overwritten so edits to `resources/skills` take effect next start. Refresh is scoped by a `.nextcowork-bundled` sentinel written into each installed bundled package; a Skill you installed yourself (no sentinel) is never touched, even if it shares a name.
+Bundled Skills live in the Zhimagu CoWork repository at `resources/skills/<skill-name>/SKILL.md`. On application startup, each bundled Skill is installed into the global Skill root and **refreshed on every launch** — the previously bundled copy is overwritten so edits to `resources/skills` take effect next start. Refresh is scoped by a `.nextcowork-bundled` sentinel written into each installed bundled package; a Skill you installed yourself (no sentinel) is never touched, even if it shares a name.
 
 Inspect the existing implementation before changing behavior:
 
@@ -133,12 +133,12 @@ Return a stable, localized error key from renderer code and map it in both local
 
 Use a square raster icon for Skill cards. Prefer a 1:1 crop, clear subject at small sizes, simple background, no embedded text, no watermark, and a final file under 256 KB. Store project-bound examples in `assets/`; use the upload flow when publishing so the image is stored as a Skill resource rather than embedded as a large data URL in metadata.
 
-When working in the NextCoWork source repository, the optional reference icon is `src/renderer/assets/skills/skill-creator-icon.jpg`. Use it as the visual direction for Skill Creator surfaces: a centered geometric toolbox-and-document mark, deep green and warm gold accents, a quiet background, and enough contrast for a 48–64 px card. This renderer asset is not part of the installed Skill; never require it for Skill discovery or installation.
+When working in the Zhimagu CoWork source repository, the optional reference icon is `src/renderer/assets/skills/skill-creator-icon.jpg`. Use it as the visual direction for Skill Creator surfaces: a centered geometric toolbox-and-document mark, deep green and warm gold accents, a quiet background, and enough contrast for a 48–64 px card. This renderer asset is not part of the installed Skill; never require it for Skill discovery or installation.
 
 When calling an image generation interface for a Skill logo, generate from a logo-specific prompt rather than a scene prompt:
 
 ```text
-为 NextCoWork 的 <Skill 名称> 设计一个专业软件产品 Logo 图标。用 <核心符号> 表达 <Skill 能力>。正方形 1:1 构图，单一居中主体，适合 48px 到 64px 的桌面端 Skill 卡片，品牌色 <颜色>，轻微半立体或扁平矢量质感，边缘清晰，高对比度，干净纯色背景。只生成图形 Logo，不要人物、场景、道具堆叠、文字、字母、数字、边框或水印。
+为 Zhimagu CoWork 的 <Skill 名称> 设计一个专业软件产品 Logo 图标。用 <核心符号> 表达 <Skill 能力>。正方形 1:1 构图，单一居中主体，适合 48px 到 64px 的桌面端 Skill 卡片，品牌色 <颜色>，轻微半立体或扁平矢量质感，边缘清晰，高对比度，干净纯色背景。只生成图形 Logo，不要人物、场景、道具堆叠、文字、字母、数字、边框或水印。
 ```
 
 For the bundled Skill Creator example, use a magic toolbox, document page, and sparkle motif in deep green and warm gold. Request a square output when the provider supports it; otherwise crop the generated image around the single mark and keep the final file under 256 KB.

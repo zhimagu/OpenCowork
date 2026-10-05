@@ -1,5 +1,5 @@
 appId: com.nextcowork.app
-productName: NextCoWork
+productName: Zhimagu CoWork
 directories:
   buildResources: build
   output: dist
@@ -72,7 +72,7 @@ win:
     - nsis
 mac:
   category: public.app-category.developer-tools
-  artifactName: ${productName}-${version}-${arch}-mac.${ext}
+  artifactName: ${name}-${version}-${arch}-mac.${ext}
   target:
     - dmg
     - zip
@@ -81,6 +81,7 @@ mac:
     - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
 linux:
+  artifactName: ${name}-${version}-${arch}-linux.${ext}
   target:
     - AppImage
 nsis:

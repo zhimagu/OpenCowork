@@ -38,12 +38,12 @@ export function initTray(showMain: () => void): void {
   image.setTemplateImage(true)
 
   tray = new Tray(image)
-  tray.setToolTip('NextCoWork')
+  tray.setToolTip('Zhimagu CoWork')
 
   const menu = Menu.buildFromTemplate([
-    { label: '显示 NextCoWork', click: showMain },
+    { label: '显示 Zhimagu CoWork', click: showMain },
     { type: 'separator' },
-    { label: '退出 NextCoWork', role: 'quit' }
+    { label: '退出 Zhimagu CoWork', role: 'quit' }
   ])
 
   if (process.platform === 'linux') {

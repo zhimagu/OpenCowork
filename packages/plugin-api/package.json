@@ -1,7 +1,7 @@
 {
   "name": "@aidotnet/plugin-api",
   "version": "0.2.0",
-  "description": "Type definitions for NextCoWork plugins (logic, views and the host UI kit). Zero runtime code.",
+  "description": "Type definitions for Zhimagu CoWork plugins (logic, views and the host UI kit). Zero runtime code.",
   "license": "MIT",
   "types": "./nextcowork.d.ts",
   "files": [

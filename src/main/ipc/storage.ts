@@ -1050,7 +1050,7 @@ export function vacuum(): StorageStats {
 
 export async function exportData(req: { includeEncryptedKeys?: boolean; password?: string }): Promise<{ path: string; encrypted: boolean; bytes: number } | null> {
   const result = await dialog.showSaveDialog({
-    title: '导出 NextCoWork 数据',
+    title: '导出 Zhimagu CoWork 数据',
     defaultPath: join(dataDirectory(), `nextcowork-data-${new Date().toISOString().slice(0, 10)}.json`),
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
@@ -1064,7 +1064,7 @@ export async function exportData(req: { includeEncryptedKeys?: boolean; password
 export async function importPreview(ownerId = 0): Promise<ImportPreview | null> {
   // Starting a new chooser invalidates this window's previous confirmation.
   pendingImports.delete(ownerId)
-  const result = await dialog.showOpenDialog({ title: '导入 NextCoWork 数据', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
+  const result = await dialog.showOpenDialog({ title: '导入 Zhimagu CoWork 数据', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] })
   if (result.canceled || !result.filePaths[0]) return null
   const path = result.filePaths[0]
   const data = parseExport(path)
@@ -1161,7 +1161,7 @@ export async function chooseBackupDirectory(): Promise<string | null> {
   if (result.canceled || !result.filePaths[0]) return null
   const path = resolve(result.filePaths[0])
   if (isDangerousBackupPath(path, dataDirectory(), databaseFilePath())) {
-    throw new IpcError('unknown', '备份目录不能位于 NextCoWork 数据目录内或包含数据目录')
+    throw new IpcError('unknown', '备份目录不能位于 Zhimagu CoWork 数据目录内或包含数据目录')
   }
   try {
     mkdirSync(path, { recursive: true })
@@ -1190,7 +1190,7 @@ function ensureBackupDirectory(): string {
   if (!path) throw new IpcError('unknown', '请先选择备份目录')
   if (!isAbsolute(path)) throw new IpcError('unknown', '备份目录路径无效')
   const normalized = normalizeLocalBackupDirectory(path)
-  if (normalized === null) throw new IpcError('unknown', '备份目录路径无效或与 NextCoWork 数据目录重叠')
+  if (normalized === null) throw new IpcError('unknown', '备份目录路径无效或与 Zhimagu CoWork 数据目录重叠')
   try {
     mkdirSync(normalized, { recursive: true })
     const lst = lstatSync(normalized)
@@ -1516,7 +1516,7 @@ export async function restoreBackup(req: { confirm?: boolean }, ownerId = 0): Pr
   if (req.confirm !== true) {
     // A canceled/replaced chooser must not leave an older file confirmable.
     pendingRestores.delete(ownerId)
-    const result = await dialog.showOpenDialog({ title: '从备份恢复', properties: ['openFile'], filters: [{ name: 'NextCoWork 备份', extensions: ['ncwbackup'] }] })
+    const result = await dialog.showOpenDialog({ title: '从备份恢复', properties: ['openFile'], filters: [{ name: 'Zhimagu CoWork 备份', extensions: ['ncwbackup'] }] })
     if (result.canceled || !result.filePaths[0]) return null
     const path = result.filePaths[0]
     const parsed = parseBackup(path)

@@ -20,7 +20,7 @@ test('parseArgs defaults prereleases to the beta channel', () => {
 
 test('collectArtifacts finds one uploadable artifact for each target', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nextcowork-release-'))
-  await Promise.all(['NextCoWork-0.1.3-setup.exe', 'NextCoWork-0.1.3.AppImage', 'NextCoWork-0.1.3-arm64.dmg', 'NextCoWork-0.1.3-x64.dmg', 'NextCoWork-0.1.3-arm64-mac.zip', 'NextCoWork-0.1.3-x64-mac.zip'].map(name => writeFile(join(dir, name), name)))
+  await Promise.all(['zhimagu-cowork-0.1.3-setup.exe', 'zhimagu-cowork-0.1.3-x64-linux.AppImage', 'zhimagu-cowork-0.1.3-arm64-mac.dmg', 'zhimagu-cowork-0.1.3-x64-mac.dmg', 'zhimagu-cowork-0.1.3-arm64-mac.zip', 'zhimagu-cowork-0.1.3-x64-mac.zip'].map(name => writeFile(join(dir, name), name)))
   const result = await collectArtifacts(dir, true)
   assert.equal(result.found.length, 6)
   assert.deepEqual(result.found.map(item => `${item.platform}/${item.architecture}/${item.artifactType ?? 'installer'}`), ['windows/x64/installer', 'linux/x64/installer', 'macos/arm64/installer', 'macos/x64/installer', 'macos/arm64/update', 'macos/x64/update'])
@@ -29,7 +29,7 @@ test('collectArtifacts finds one uploadable artifact for each target', async () 
 test('collectArtifacts reports missing targets and can be used for partial local uploads', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nextcowork-release-'))
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'NextCoWork-0.1.3.AppImage'), 'linux')
+  await writeFile(join(dir, 'zhimagu-cowork-0.1.3-x64-linux.AppImage'), 'linux')
   const result = await collectArtifacts(dir)
   assert.equal(result.found.length, 1)
   assert.equal(result.missing.length, 5)
@@ -38,7 +38,7 @@ test('collectArtifacts reports missing targets and can be used for partial local
 
 test('uploadArtifacts streams the file and sends the API contract headers', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'nextcowork-release-'))
-  const fileName = 'NextCoWork-0.1.3.AppImage'
+  const fileName = 'zhimagu-cowork-0.1.3-x64-linux.AppImage'
   const content = 'test release bytes'
   await writeFile(join(dir, fileName), content)
   const seen = await new Promise((resolve, reject) => {

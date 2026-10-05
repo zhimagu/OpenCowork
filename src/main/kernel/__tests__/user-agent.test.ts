@@ -15,7 +15,7 @@ describe('user-agent', () => {
     installUserAgent('9.9.9')
     const ua = userAgent()
 
-    expect(ua).toBe(`NextCoWork/9.9.9 (${process.platform}; ${process.arch})`)
+    expect(ua).toBe(`ZhimaguCoWork/9.9.9 (${process.platform}; ${process.arch})`)
     // Electron 默认那串里的东西一个都不该留下
     expect(ua).not.toMatch(/Mozilla|AppleWebKit|Chrome|Electron|Safari/)
   })
@@ -29,7 +29,7 @@ describe('user-agent', () => {
     })
 
     await fetch('https://api.example.com/search', { headers: { accept: 'application/json' } })
-    expect(seen).toBe(`NextCoWork/9.9.9 (${process.platform}; ${process.arch})`)
+    expect(seen).toBe(`ZhimaguCoWork/9.9.9 (${process.platform}; ${process.arch})`)
   })
 
   it('withUserAgent 不覆盖适配器自己写的 UA', async () => {

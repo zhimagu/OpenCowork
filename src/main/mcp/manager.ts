@@ -71,7 +71,7 @@ interface Entry {
 }
 
 /** 客户端自报家门。服务器日志里看到的就是这个名字。 */
-const CLIENT_INFO = { name: 'NextCoWork', version: '0.1.0' } as const
+const CLIENT_INFO = { name: 'Zhimagu CoWork', version: '0.1.0' } as const
 
 function describeError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)

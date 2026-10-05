@@ -44,7 +44,7 @@ import { useWindowStore } from '../stores/window'
  * 帮助与反馈的落点：官网文档站。
  *
  * ★ 这是**与平台对齐后的选择，不是从代码里推出来的** —— CoWork 的公开站有
- * /docs、/privacy、/pricing，没有反馈页；NextCoWork 这边此前也没有任何帮助入口。
+ * /docs、/privacy、/pricing，没有反馈页；Zhimagu CoWork 这边此前也没有任何帮助入口。
  * 平台以后给出反馈表单 / 邮箱，改这里一行即可。
  */
 const HELP_URL = 'https://nextco.work/docs'
@@ -300,7 +300,7 @@ function BalanceRow({
  * 圆形头像。
  *
  * ★ **没有 `avatarUrl` 时回落到品牌标识，不是通用人形。** 侧边栏这一小块从
- * 一开始画的就是 NextCoWork 标识（离线态尤其如此），换成 `UserCircle` 会让
+ * 一开始画的就是 Zhimagu CoWork 标识（离线态尤其如此），换成 `UserCircle` 会让
  * 「本地模式」看起来像另一个产品。
  */
 function Avatar({ url, size }: { url: string | null; size: number }): ReactNode {

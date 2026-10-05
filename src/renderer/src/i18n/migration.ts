@@ -15,7 +15,7 @@
 type Params = Record<string, string | number>
 
 export const migrationZh = {
-  'migration.startup.failedTitle': 'NextCoWork 启动失败',
+  'migration.startup.failedTitle': 'Zhimagu CoWork 启动失败',
   'migration.startup.failedBody':
     '本地服务未能完成初始化。数据没有被删除，请打开数据目录备份，并复制下方诊断信息。',
   'migration.startup.delayedTitle': '启动时间比预期长',
@@ -46,7 +46,7 @@ export const migrationZh = {
   'migration.error.permission': '无法读写数据目录，请检查文件权限，或先打开数据目录确认。',
   'migration.error.source-corrupt': '旧数据文件已损坏，无法读取其中的会话。',
   'migration.error.target-corrupt': '当前数据文件无法读取，可能是文件损坏。请先打开数据目录确认。',
-  'migration.error.target-locked': '数据文件被其他程序占用，请关闭其他 NextCoWork 窗口后重试。',
+  'migration.error.target-locked': '数据文件被其他程序占用，请关闭其他 Zhimagu CoWork 窗口后重试。',
   'migration.error.unknown': '发生了未知错误，可以重试，或先跳过并继续使用。',
 
   'migration.error.whatNow': '已完成的部分已经保存，可以安全地重试或跳过。',
@@ -73,7 +73,7 @@ export const migrationZh = {
 }
 
 export const migrationEn = {
-  'migration.startup.failedTitle': 'NextCoWork could not start',
+  'migration.startup.failedTitle': 'Zhimagu CoWork could not start',
   'migration.startup.failedBody':
     'The local service could not finish initializing. Your data was not deleted. Open the data directory to back it up, then copy the diagnostics below.',
   'migration.startup.delayedTitle': 'Startup is taking longer than expected',
@@ -107,7 +107,7 @@ export const migrationEn = {
   'migration.error.target-corrupt':
     'The current data file cannot be read; it may be damaged. Open the data directory to look.',
   'migration.error.target-locked':
-    'The data file is in use by another program. Close any other NextCoWork windows and try again.',
+    'The data file is in use by another program. Close any other Zhimagu CoWork windows and try again.',
   'migration.error.unknown': 'An unknown error occurred. You can retry, or skip and keep using the app.',
 
   'migration.error.whatNow': 'What already finished has been saved. Retrying or skipping is safe.',

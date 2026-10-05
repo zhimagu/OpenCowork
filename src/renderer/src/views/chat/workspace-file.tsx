@@ -2,7 +2,7 @@
  * 工具行需要的那两件**工作区事实**:根目录在哪、怎么打开一个文件。
  *
  * ★★ 需求:行里那条路径要显示成 `src/main/db/` 而不是
- * `…/Desktop/code/NextCoWork/src/main/db/`,并且文件名点一下就在右侧工作台打开 ——
+ * `…/Desktop/code/Zhimagu CoWork/src/main/db/`,并且文件名点一下就在右侧工作台打开 ——
  * 两件事都要知道「当前是哪个工作区」,而工具行挂在
  * `ChatView → Thread → AssistantTurn → ToolTimeline → ToolGroup → ToolCallCard` 的底部。
  * 为它们把 workspace 穿过四层纯展示组件,会让 `ToolTimeline` 从「把时间线摆好」

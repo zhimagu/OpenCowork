@@ -36,7 +36,7 @@ export interface SettingsPage {
   /** 子 Tab(参考图里「通用」下的 应用|Agent|任务)。没有就是单页 */
   subs?: readonly SettingsSub[]
   /**
-   * 只在登录 NextCoWork 账户后出现在导航与搜索里。
+   * 只在登录 Zhimagu CoWork 账户后出现在导航与搜索里。
    * 需求：钱包的一切（余额、充值、消费记录）都属于账户，本地模式下这一页没有任何能做的事 ——
    * 画出来就是一个点进去只剩「请登录」的入口。过滤只在 `visibleSettingsPages` 一处做。
    */
@@ -58,7 +58,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   /**
    * ★ 第十一页,**不是**照参考图铺的 —— 参考图里没有它。
    *
-   * 它和「数据」页那个「导入数据」是**两回事**:那边读的是 NextCoWork 自己
+   * 它和「数据」页那个「导入数据」是**两回事**:那边读的是 Zhimagu CoWork 自己
    * 导出的整库备份,这边读的是别的 AI 应用留在本机的目录。合进「数据」页的话,
    * 页面上会同时出现两颗都叫「导入」的按钮,而误点的代价是一份外部数据
    * 覆盖掉整套设置。分成两页是让这两件事在界面上**永远不挨着**。

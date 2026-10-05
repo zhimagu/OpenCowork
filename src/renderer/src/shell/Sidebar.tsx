@@ -156,7 +156,7 @@ export function Sidebar({
           */}
           <div className="flex items-center gap-2 px-4 pt-1 pb-4 text-fg">
             <Mark />
-            <span className="font-brand text-[15px] font-bold tracking-tight">NextCoWork</span>
+            <span className="font-brand text-[15px] font-bold tracking-tight">Zhimagu CoWork</span>
             {appVersion !== '' && (
               <span className="ml-auto font-mono text-[11px] text-fg-faint">
                 <span className="sr-only">{t('sidebar.version')}</span>v{appVersion}
@@ -276,7 +276,7 @@ export function Sidebar({
       </div>
 
       {/*
-        参考实现这里是账户 / 游客模式。NextCoWork 没有账户体系(方案 §10 砍掉了
+        参考实现这里是账户 / 游客模式。Zhimagu CoWork 没有账户体系(方案 §10 砍掉了
         钱包 / 云同步 / 每日回顾那一整块商业化面),所以这个位置换成「账户菜单 +
         设置入口」—— 形状留着,含义换掉。
 

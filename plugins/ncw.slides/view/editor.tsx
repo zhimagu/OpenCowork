@@ -3,7 +3,7 @@
  *
  * ## 为了什么需求建的
  *
- * 用户要在 NextCoWork 里像 WPS 演示一样看、改 PowerPoint 文件,并且与 Agent 改的是同一份活动模型
+ * 用户要在 Zhimagu CoWork 里像 WPS 演示一样看、改 PowerPoint 文件,并且与 Agent 改的是同一份活动模型
  * (计划 §1、§7.2「Slides 缩略图 / 放映」)。幻灯片本身由引擎画(宿主的 `DocumentCanvas`,居中放在
  * 留白里);这里做演示特有的外壳:功能区、左侧缩略图栏、状态栏、放映。
  *

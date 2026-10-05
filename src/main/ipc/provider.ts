@@ -291,7 +291,7 @@ function mergeProtocolOptions(
  *
  * 内置上游的 ref 因此也稳得住 —— 它建表时用的是别的前缀,改地址不会把它冲掉。
  *
- * ★★ **NextCoWork 那条走「字段级托管」,不是整条拒绝。**
+ * ★★ **Zhimagu CoWork 那条走「字段级托管」,不是整条拒绝。**
  * 它的 `name` / `baseUrl` / `credentialRef` 归登录流程(`client-auth.ts`),
  * 而 `protocol` / `protocolOptions` / `priority` / `enabled` 归用户 ——
  * 用户要能翻「API 格式」那个开关。地址锁死不是保守:`credentialRef` 里存的是
@@ -325,7 +325,7 @@ export function upsertProvider(input: UpstreamProvider): UpstreamProvider {
     access token、却顶着内置身份(删不掉、密钥栏没有输入框)的死记录。
   */
   const managed = id === CLIENT_PROVIDER_ID
-  if (managed && existing === undefined) throw new Error('请先登录 NextCoWork 账号')
+  if (managed && existing === undefined) throw new Error('请先登录 Zhimagu CoWork 账号')
   // 托管那条的三个字段一律回落到库里那份;别的供应商 `platform` 是 undefined,照常走入参
   const platform = managed ? existing : undefined
   const name = platform?.name ?? input.name.trim()
@@ -718,7 +718,7 @@ export async function setCredential(providerId: string, apiKey: string): Promise
   ensureSeeded()
   const p = store.listProviders().find((x) => x.id === providerId)
   if (p === undefined) throw new Error(`没有这个供应商:${providerId}`)
-  if (providerId === CLIENT_PROVIDER_ID) throw new Error('NextCoWork 内置提供商的登录凭证不能手动修改')
+  if (providerId === CLIENT_PROVIDER_ID) throw new Error('Zhimagu CoWork 内置提供商的登录凭证不能手动修改')
   const key = apiKey.trim()
   if (key === '') throw new Error('密钥不能为空')
   await getHost().secrets.set(p.credentialRef, key)

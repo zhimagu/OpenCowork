@@ -70,7 +70,7 @@ export interface UpstreamTransport {
 const IDENTITY: UpstreamTransport = { headers: {}, body: (b) => b }
 
 /**
- * NextCoWork 平台那条上游的鉴权形状。**不是平台的供应商返回 `null`,请求逐字节不变。**
+ * Zhimagu CoWork 平台那条上游的鉴权形状。**不是平台的供应商返回 `null`,请求逐字节不变。**
  *
  * ★★ 平台那条的凭证是**登录 access token(JWT)**,不是平台 API Key —— 它由
  * `ipc/client-auth.ts` 在登录时写进 `nextcowork:client-access-token`,用户从来没有

@@ -43,7 +43,7 @@ function scaffold(): unknown {
     .replaceAll('__PUBLISHER__', 'acme')
     .replaceAll('__NAME__', 'hello')
     .replaceAll('__DISPLAY_NAME__', 'Hello')
-    .replaceAll('__DESCRIPTION__', 'A NextCoWork plugin')
+    .replaceAll('__DESCRIPTION__', 'A Zhimagu CoWork plugin')
     .replaceAll('__ENGINES__', defaultEngines())
   return JSON.parse(filled)
 }

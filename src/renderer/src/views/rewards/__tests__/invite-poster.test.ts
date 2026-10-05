@@ -93,8 +93,8 @@ describe('buildInvitePosterSvg', () => {
 
 describe('invitePosterFileName', () => {
   it('keeps the code in the name and strips anything a path cannot hold', () => {
-    expect(invitePosterFileName('a1b2c3')).toBe('nextcowork-invite-a1b2c3.png')
-    expect(invitePosterFileName('../etc/passwd')).toBe('nextcowork-invite-etcpasswd.png')
-    expect(invitePosterFileName('')).toBe('nextcowork-invite.png')
+    expect(invitePosterFileName('a1b2c3')).toBe('zhimagu-cowork-invite-a1b2c3.png')
+    expect(invitePosterFileName('../etc/passwd')).toBe('zhimagu-cowork-invite-etcpasswd.png')
+    expect(invitePosterFileName('')).toBe('zhimagu-cowork-invite.png')
   })
 })

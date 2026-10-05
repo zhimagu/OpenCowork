@@ -1,6 +1,6 @@
 # @aidotnet/plugin-api
 
-NextCoWork 插件的类型声明。**零运行时代码** —— 这个包里只有一份 `nextcowork.d.ts`。
+Zhimagu CoWork 插件的类型声明。**零运行时代码** —— 这个包里只有一份 `nextcowork.d.ts`。
 
 ```bash
 npm i -D @aidotnet/plugin-api

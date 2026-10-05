@@ -1,11 +1,11 @@
 ---
 name: plugin-builder
-description: Author, package, and debug NextCoWork plugins — the single entry point. Covers the manifest (package.json) and the permission model with per-call capability gates, every contribution point (commands, menus, keybindings, custom editors, views, web apps, agent tools, card views, configuration, bundled Skills) including which install cleanly but do nothing yet, the ncw:doc document channel, result / live-progress / interactive cards, the nextcowork runtime API namespaces, the sandbox and isolation model, and build + ZIP + market publishing rules. Use for scaffolding a plugin, choosing what to contribute, writing or reviewing a manifest, picking or debugging a permission, taking over a file type, bundling Skills with a plugin, giving the agent new tools, or fixing a plugin that builds, installs, activates, renders, or publishes wrong. Detailed material lives in references/ next to this file.
+description: Author, package, and debug Zhimagu CoWork plugins — the single entry point. Covers the manifest (package.json) and the permission model with per-call capability gates, every contribution point (commands, menus, keybindings, custom editors, views, web apps, agent tools, card views, configuration, bundled Skills) including which install cleanly but do nothing yet, the ncw:doc document channel, result / live-progress / interactive cards, the nextcowork runtime API namespaces, the sandbox and isolation model, and build + ZIP + market publishing rules. Use for scaffolding a plugin, choosing what to contribute, writing or reviewing a manifest, picking or debugging a permission, taking over a file type, bundling Skills with a plugin, giving the agent new tools, or fixing a plugin that builds, installs, activates, renders, or publishes wrong. Detailed material lives in references/ next to this file.
 ---
 
-# NextCoWork Plugin Builder
+# Zhimagu CoWork Plugin Builder
 
-Build plugins that extend the NextCoWork desktop app and its AI agent. A plugin is a self-contained package that runs **sandboxed** and talks to the host over a small, permissioned RPC surface.
+Build plugins that extend the Zhimagu CoWork desktop app and its AI agent. A plugin is a self-contained package that runs **sandboxed** and talks to the host over a small, permissioned RPC surface.
 
 ## Read the reference you need — this page is the map
 

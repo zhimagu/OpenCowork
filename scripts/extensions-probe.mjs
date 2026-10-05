@@ -8,7 +8,7 @@
  *
  *   - **单实例锁**。`src/main/index.ts` 里 `app.requestSingleInstanceLock()` 排在
  *     `app.setPath('userData', …)` **前面**,所以取锁那一刻用的就是命令行给的这个值。
- *     不传它的话,开发实例会和已安装的 NextCoWork.app 抢同一把锁 —— 表现极具
+ *     不传它的话,开发实例会和已安装的 Zhimagu CoWork.app 抢同一把锁 —— 表现极具
  *     迷惑性:Electron 照常打印 `DevTools listening`,但 CDP 的 `/json` 永远是空的
  *     (窗口压根没建),进程静默退出且 exit code 是 0。
  *

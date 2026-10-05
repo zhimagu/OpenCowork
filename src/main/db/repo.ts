@@ -3018,7 +3018,7 @@ export function removeCredential(ref: string): void {
 /**
  * 这一节是「导入两次仍一份」的全部实现。
  *
- * ★ 刻意**不**复用 `mergeDataExport`:那个函数为 NextCoWork 自己的整库备份而写,
+ * ★ 刻意**不**复用 `mergeDataExport`:那个函数为 Zhimagu CoWork 自己的整库备份而写,
  * 会合并全套设置并按时间戳覆盖。外部来源要的是逐项、可重试、可脱离的语义,
  * 两者只是名字里都有「导入」。
  */

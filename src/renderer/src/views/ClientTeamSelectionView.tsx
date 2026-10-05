@@ -32,7 +32,7 @@ export function ClientTeamSelectionView({ auth, onComplete }: { auth: ClientAuth
       <div className="relative flex w-[min(520px,calc(100%-32px))] flex-col px-6 py-10">
         <div className="mb-8 flex items-center gap-3 text-[24px] font-semibold tracking-[-0.04em]">
           <Mark size={30} className="text-white" />
-          <span>NextCoWork</span>
+          <span>Zhimagu CoWork</span>
         </div>
         <h1 className="text-[24px] font-medium tracking-[-0.03em]">{t('auth.selectTeamTitle')}</h1>
         <p className="mt-2 text-[13px] leading-6 text-white/50">{t('auth.selectTeamHint')}</p>

@@ -11,7 +11,7 @@
  *
  * 两个版本号回答的是不同的问题:
  *
- * - 应用版本:用户手上这个 NextCoWork 是哪一版(市场按它做灰度,见
+ * - 应用版本:用户手上这个 Zhimagu CoWork 是哪一版(市场按它做灰度,见
  *   `ipc/plugin-market.ts` 的 `client` 参数 —— 所以 `PluginCatalog.hostVersion`
  *   保持应用版本不动);
  * - **API 版本**:`nextcowork` 这个模块的形状是哪一版。插件声明的是后者。

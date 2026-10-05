@@ -283,6 +283,41 @@ function mergeSubagentModelOverrides(
 }
 
 /**
+ * `subagent.thinkingOverrides` 的合并:**按 key 合并**,patch 里没出现的角色原样
+ * 保留(连续给两个角色配 patch 不能互相冲掉)。条目级规则:
+ *
+ * - 值是 `INHERIT_THINKING`(`'inherit'`)的条目**剪掉**(那个键从盘上消失,
+ *   不是留一个死条目)—— 和 `modelOverrides` 的空 `model` 是同一协议,UI 清空
+ *   覆盖时发的正是它。
+ * - 认不出的值(空串 / 非字符串 / 坏枚举)**逐条丢弃、其余照常**:一个角色的
+ *   垃圾不该让整张覆盖表作废,也不该冲掉那个角色已有的有效配置。
+ */
+function mergeSubagentThinkingOverrides(
+  current: AppSettings['subagent']['thinkingOverrides'],
+  patch: unknown
+): AppSettings['subagent']['thinkingOverrides'] {
+  const merged: AppSettings['subagent']['thinkingOverrides'] = { ...current }
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) return merged
+  for (const [role, value] of Object.entries(patch as Record<string, unknown>)) {
+    // ★ role 是用户可控的字符串:`__proto__` 直接赋值会触发 setter 改原型,
+    //   `constructor` / `prototype` 同为危险键(注意这仨里后两个**过得了**下面的
+    //   名字正则,所以必须显式跳过)。角色名再过一遍与加载器一致的 AGENT_NAME_RE。
+    if (role === '__proto__' || role === 'constructor' || role === 'prototype') continue
+    if (!AGENT_NAME_RE.test(role)) continue
+    if (value === INHERIT_THINKING) {
+      delete merged[role]
+      continue
+    }
+    if (isSubagentThinking(value)) {
+      merged[role] = value
+      continue
+    }
+    // 其余(空串、非字符串、坏枚举)保留该角色已有有效值。
+  }
+  return merged
+}
+
+/**
  * 模型自提目标的三档。★ 它管的是「要不要弹审批」,所以坏值不许落库:
  * 落到 `'disabled'` 会让用户凭空失去一个功能,落到 `'auto'` 则是**静默放宽同意**。
  */
@@ -456,6 +491,17 @@ export interface AppSettings {
      *   必须把旧锁清掉,否则拼出「A 家别名 + B 家锁」。
      */
     modelOverrides: Record<string, { model: string; modelProviderId?: string }>
+    /**
+     * 设置 › 「按角色覆盖子代理思考深度」,键是角色名(`general-purpose` 等)。
+     * 与 `modelOverrides` 同构的「按角色覆盖」表,但只管思考深度。
+     *
+     * ★ 值 `'inherit'` = 不覆盖,合并时**把这个键剪掉**(和 `modelOverrides`
+     *   的空 `model` 是同一协议)。于是解析时拿到要么是合法档位、要么是缺席。
+     * ★ 四档优先级:`.md 声明 > 这张表 > 设置·默认子代理 > 父 run`。
+     * ★ 不按 `source.kind` 设门槛:同名 `.md` 覆盖内置角色后 kind 会变成 project,
+     *   加门槛会让设置覆盖凭空消失(理由同 `runtime.ts` 的 `roleThinkingOverride`)。
+     */
+    thinkingOverrides: Record<string, SubagentThinking>
   }
 
   /** 本地模型网关 —— ★ 默认关闭(方案 §5.4 第 1 条) */
@@ -572,7 +618,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultOpenTarget: '',
   // 思考档位出厂「跟随本轮对话」—— 这正是引入这一栏之前的行为,老用户升级后
   // 子代理的档位一个字都不变(见 `subagent-thinking.ts`)。
-  subagent: { model: '', thinking: INHERIT_THINKING, perSessionLimit: 4, globalLimit: 4, modelOverrides: {} },
+  subagent: { model: '', thinking: INHERIT_THINKING, perSessionLimit: 4, globalLimit: 4, modelOverrides: {}, thinkingOverrides: {} },
   gateway: { enabled: false, preferredPort: 19836, failover: false },
   providerAccountRotation: true,
   notifications: { taskComplete: true, permissionApproval: true, planApproval: true },
@@ -699,9 +745,11 @@ export function mergeSettings(current: AppSettings, patch: AppSettingsPatch): Ap
     }
   }
   if (patch.subagent !== undefined) {
-    // modelOverrides 要**按 key 合并**,先于下面的 spread 算(spread 会把它整体替换掉)
+    // modelOverrides / thinkingOverrides 要**按 key 合并**,先于下面的 spread 算
+    // (spread 会把它整体替换掉)
     const modelOverrides = mergeSubagentModelOverrides(next.subagent.modelOverrides, patch.subagent.modelOverrides)
-    next.subagent = { ...next.subagent, ...patch.subagent, modelOverrides }
+    const thinkingOverrides = mergeSubagentThinkingOverrides(next.subagent.thinkingOverrides, patch.subagent.thinkingOverrides)
+    next.subagent = { ...next.subagent, ...patch.subagent, modelOverrides, thinkingOverrides }
     // ★ 这一行是那条「成对写」规则在**浅合并**下的补丁:上面的 spread 只覆盖
     //   patch 里出现过的键,于是只给 `model` 时旧的 `modelProviderId` 会原样留下。
     if (patch.subagent.model !== undefined) next.subagent.modelProviderId = patch.subagent.modelProviderId

@@ -19,6 +19,7 @@ import {
   type AppSettingsPatch
 } from '../settings'
 import { DEFAULT_MAX_OUTPUT_TOKENS, resolveMaxOutputTokens } from '../../agent/run-request'
+import { INHERIT_THINKING } from '../subagent-thinking'
 
 const base = (): AppSettings => structuredClone(DEFAULT_SETTINGS)
 
@@ -82,7 +83,7 @@ describe('mergeSettings', () => {
       proxy: { host: '127.0.0.1', port: 7890 }
     })
     expect(s.subagent).toEqual({
-      model: '', thinking: 'inherit', perSessionLimit: 4, globalLimit: 8, modelOverrides: {}
+      model: '', thinking: 'inherit', perSessionLimit: 4, globalLimit: 8, modelOverrides: {}, thinkingOverrides: {}
     })
     // 只给了两段,另外六段是缺省值 —— 这一条钉的就是「兄弟属性还在」
     expect(s.proxy).toEqual({
@@ -454,6 +455,78 @@ describe('mergeSettings · subagent.modelOverrides', () => {
     // 原型没被污染 —— 这是危险键守卫要挡的那个
     expect(Object.hasOwn(Object.prototype, 'evil')).toBe(false)
     expect(({} as Record<string, unknown>).evil).toBeUndefined()
+  })
+})
+
+/**
+ * 「设置·按角色」的**思考深度**覆盖表(`subagent.thinkingOverrides`)。
+ * 与 modelOverrides 同构:按 key 合并、`'inherit'` 剪键、坏值逐条丢。
+ */
+describe('mergeSettings · subagent.thinkingOverrides', () => {
+  it('默认是空表;旧库整块缺席时补成 {}', () => {
+    expect(DEFAULT_SETTINGS.subagent.thinkingOverrides).toEqual({})
+    const legacySub = structuredClone(DEFAULT_SETTINGS.subagent) as Record<string, unknown>
+    delete legacySub.thinkingOverrides
+    const legacy = structuredClone(DEFAULT_SETTINGS) as Partial<AppSettings>
+    legacy.subagent = legacySub as AppSettings['subagent']
+    expect(mergeSettings(DEFAULT_SETTINGS, legacy).subagent.thinkingOverrides).toEqual({})
+  })
+
+  it('★ 按 key 合并:连续 patch 两个角色,第一个不被冲掉', () => {
+    let s = mergeSettings(base(), {
+      subagent: { thinkingOverrides: { 'code-analyst': 'high' } }
+    })
+    s = mergeSettings(s, {
+      subagent: { thinkingOverrides: { 'code-reviewer': 'low' } }
+    })
+    expect(s.subagent.thinkingOverrides).toEqual({
+      'code-analyst': 'high',
+      'code-reviewer': 'low'
+    })
+  })
+
+  it('★ inherit 的条目被剪掉 —— 盘上不累积死键(清空覆盖走的就是它)', () => {
+    let s = mergeSettings(base(), {
+      subagent: { thinkingOverrides: { 'code-analyst': 'high' } }
+    })
+    s = mergeSettings(s, { subagent: { thinkingOverrides: { 'code-analyst': INHERIT_THINKING } } })
+    expect(s.subagent.thinkingOverrides).toEqual({})
+  })
+
+  it('坏值逐条丢弃、其余保留,且不冲掉该角色已有的有效配置', () => {
+    let s = mergeSettings(base(), {
+      subagent: { thinkingOverrides: { 'code-analyst': 'high' } }
+    })
+    s = mergeSettings(s, {
+      subagent: {
+        thinkingOverrides: {
+          'code-analyst': '',
+          'code-reviewer': 42,
+          'code-editor': 'deep',
+          'general-purpose': 'low'
+        } as unknown as AppSettings['subagent']['thinkingOverrides']
+      }
+    })
+    expect(s.subagent.thinkingOverrides).toEqual({
+      'code-analyst': 'high',
+      'general-purpose': 'low'
+    })
+  })
+
+  it('★ 危险键(__proto__ 等)与不合法角色名一律跳过:不写入、不污染原型,其余条目照常', () => {
+    // JSON.parse 才能把 `__proto__` 造成**自有键**;对象字面量会走 setter,
+    // 测不到合并路径本身。
+    const patchOverrides = JSON.parse(`{
+      "__proto__": "high",
+      "constructor": "low",
+      "prototype": "auto",
+      "bad name": "high",
+      "code-analyst": "high"
+    }`) as AppSettings['subagent']['thinkingOverrides']
+    const s = mergeSettings(base(), { subagent: { thinkingOverrides: patchOverrides } })
+    expect(s.subagent.thinkingOverrides).toEqual({ 'code-analyst': 'high' })
+    // 合并结果的普通对象原型没被弄脏(constructor / prototype 的判别力由上面的 toEqual 承担)
+    expect(Object.getPrototypeOf(s.subagent.thinkingOverrides)).toBe(Object.prototype)
   })
 })
 

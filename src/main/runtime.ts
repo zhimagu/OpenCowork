@@ -87,7 +87,7 @@ import {
 import type { ModelAlias, UpstreamProtocol } from '../shared/domain/provider'
 import { subagentModelSelection } from '../shared/domain/model-selection'
 import { auxiliaryThinkingLevel, normalizeModelThinkingLevel } from '../shared/domain/model-runtime'
-import { subagentThinkingSelection, type SubagentThinking } from '../shared/domain/subagent-thinking'
+import { subagentThinkingSelection, INHERIT_THINKING, isSubagentThinking, type SubagentThinking } from '../shared/domain/subagent-thinking'
 import { searchSecretRef } from '../shared/domain/search'
 import { searchStatuses } from './search/status'
 import { store } from './state/store'
@@ -1695,6 +1695,7 @@ function childRequestFor(
   prompt: string,
   perRoleModel: { model: string; modelProviderId?: string },
   configuredModel: { model: string; modelProviderId?: string },
+  perRoleThinking: ThinkingLevel | undefined,
   configuredThinking: SubagentThinking
 ): RunRequest {
   /*
@@ -1729,7 +1730,7 @@ function childRequestFor(
     input: [{ type: 'text', text: prompt }],
     // 子代理始终按编程模式运行。Plan 模式没有 Task，ACP 则必须把实施交给子代理。
     mode: 'code',
-    thinking: childThinkingFor(def, configuredThinking, parentReq, selection),
+    thinking: childThinkingFor(def, perRoleThinking, configuredThinking, parentReq, selection),
     // 联网是用户的硬开关,子代理放宽不了
     webSearch: parentReq.webSearch,
     // 同理:子代理不能替用户决定多花一倍的钱,也不该在用户明确开了之后被压回 272K。
@@ -1755,8 +1756,8 @@ function childRequestFor(
 /**
  * 子 run 这一轮用哪个思考档位。
  *
- * 三档来源和模型那一套逐字相同(声明的 > 设置里那一栏 > 父 run),理由见
- * `subagent-thinking.ts`。取完之后**还要按子 run 自己的模型归一化一次** ——
+ * 四档来源和模型那一套逐字相同(声明的 > 按角色覆盖 > 设置里那一栏 > 父 run),
+ * 理由见 `subagent-thinking.ts`。取完之后**还要按子 run 自己的模型归一化一次** ——
  * 档位是模型的属性,而子 run 的模型和父 run 未必是同一个。
  *
  * ★ 不归一化会怎样:模型不认这个档位时,适配器要到**发请求那一刻**才抛
@@ -1767,11 +1768,12 @@ function childRequestFor(
  */
 function childThinkingFor(
   def: AgentDefinition,
+  perRole: ThinkingLevel | undefined,
   configured: SubagentThinking,
   parentReq: RunRequest,
   selection: { model: string; modelProviderId?: string }
 ): ThinkingLevel {
-  const wanted = subagentThinkingSelection(def.thinking, configured, parentReq.thinking)
+  const wanted = subagentThinkingSelection(def.thinking, perRole, configured, parentReq.thinking)
   const alias = getRouter().resolveModel(selection.model, selection.modelProviderId)
   const effective = normalizeModelThinkingLevel(wanted, alias)
   if (effective !== wanted) {
@@ -1847,6 +1849,21 @@ function roleModelOverride(def: AgentDefinition, sub: AppSettings['subagent']): 
 }
 
 /**
+ * 「设置·按角色」那一档:这个角色在 `settings.subagent.thinkingOverrides` 里的
+ * 条目。`undefined` = 这个角色没配(含 `'inherit'` —— merger 已把那个键剪掉,
+ * 所以这里也不该收到它)。`undefined` 让 `subagentThinkingSelection` 落到下一档。
+ *
+ * ★ **不按 `def.source.kind === 'builtin'` 设门槛**(同 `roleModelOverride`):
+ * 用户用同名 `.md` 覆盖内置角色之后 kind 会变成 project —— 加了门槛,覆盖文件
+ * 一出现,这个角色的设置覆盖就跟着凭空消失。按名字查表对两种来源一视同仁。
+ */
+function roleThinkingOverride(def: AgentDefinition, sub: AppSettings['subagent']): ThinkingLevel | undefined {
+  const hit = sub.thinkingOverrides[def.name]
+  if (hit === undefined || !isSubagentThinking(hit) || hit === INHERIT_THINKING) return undefined
+  return hit
+}
+
+/**
  * `ToolContext.spawnSubagent` 的生产实现 —— 两道闸门 + 排队要名额 + 建 run + 等结果。
  *
  * ★ 并发满了走的是**排队**,不是拒绝(见 `kernel/subagent-queue.ts`)。
@@ -1903,7 +1920,8 @@ function spawnSubagentFor(parent: RunHandle, parentReq: RunRequest, parentSkills
     const childRunId = `${parent.runId}:sub:${String(++childSeq)}`
     const childReq = childRequestFor(
       parentReq, parent, def, childRunId, sub.prompt,
-      roleModelOverride(def, configured), availableSubagentModel(configured), configured.thinking
+      roleModelOverride(def, configured), availableSubagentModel(configured),
+      roleThinkingOverride(def, configured), configured.thinking
     )
 
     /*

@@ -2,19 +2,24 @@
  * 子代理这一轮用哪个思考档位。
  *
  * 和 `model-selection.ts` 的 `subagentModelSelection` 是**一对**,形状也一样:
- * 三档来源、越具体的越优先,而且必须由同一段代码算出来 —— 界面显示的档位和
+ * 四档来源、越具体的越优先,而且必须由同一段代码算出来 —— 界面显示的档位和
  * 真正下发的档位分头算的话,两边只是**碰巧**一致,一旦不一致就是「设置里写着高、
  * 请求里发的是中」,且零报错。
  *
- * 三档来源:
+ * 四档来源,**越具体的越优先**:
  *
  * 1. `declared` —— `agents/<name>.md` frontmatter 里的 `thinking:`。它是对某一个
  *    子代理的明确安排(比如「这个审查代理要深想」),盖过任何全局默认。
- * 2. `configured` —— 设置 › 通用 › Agent 的「子代理思考深度」。★ 它排在父 run
+ * 2. `perRole` —— 设置里「按角色覆盖」的那张表查到这个角色的条目
+ *    (`settings.subagent.thinkingOverrides[角色名]`)。理由与 `model-selection.ts`
+ *    的 perRole 档一致:它比「默认子代理」更具体 —— 用户给某一个常用角色单独配
+ *    思考深度,正是想让它盖过全局那一栏。★ `'inherit'` 不会出现在这里:merger
+ *    已经把这个键剪掉了(见 `settings.ts` 的 `mergeSubagentThinkingOverrides`)。
+ * 3. `configured` —— 设置 › 通用 › Agent 的「子代理思考深度」。★ 它排在父 run
  *    前面才是这一栏存在的理由:子代理是拿来跑量的,用户配它就是为了让那几路
  *    别跟着主力模型这一轮的选择走。排在后面的话,只有「主力模型也没表过态」
  *    时才轮得到它 —— 也就是几乎永远不生效。
- * 3. `parent` —— 都没配时沿用父 run 这一轮的档位。
+ * 4. `parent` —— 都没配时沿用父 run 这一轮的档位。
  *
  * ★ 取出来的档位**还要按子 run 自己的模型归一化一次**(`normalizeModelThinkingLevel`,
  * 调用点在 `main/runtime.ts` 的 `childThinkingFor`):档位是模型的属性,而子 run
@@ -54,20 +59,25 @@ export function isSubagentThinking(value: unknown): value is SubagentThinking {
 }
 
 /**
- * 三档来源的落地。`declared` 缺省 = 文件里没写这一行(不是「跟随」,「跟随」由
+ * 四档来源的落地。`declared` 缺省 = 文件里没写这一行(不是「跟随」,「跟随」由
  * `configured` 那一档表达)。
  *
  * @param declared frontmatter 的 `thinking:`。★ 认不出的值在加载期就被丢掉了
  *   (见 `agent/load.ts`),所以这里拿到的要么是合法档位、要么是 `undefined`。
+ * @param perRole 设置里「按角色覆盖」那张表查到的条目。`undefined` = 这个角色没配。
+ *   ★ `'inherit'` 到不了这里 —— merger 已把那个键剪掉,所以它要么是合法档位、
+ *   要么是 `undefined`。
  * @param configured 设置里那一栏。`'inherit'` = 这一栏是「跟随本轮对话」。
  * @param parent 父 run 这一轮的档位。
  */
 export function subagentThinkingSelection(
   declared: ThinkingLevel | undefined,
+  perRole: ThinkingLevel | undefined,
   configured: SubagentThinking,
   parent: ThinkingLevel
 ): ThinkingLevel {
   if (declared !== undefined) return declared
+  if (perRole !== undefined) return perRole
   if (configured !== INHERIT_THINKING) return configured
   return parent
 }

@@ -10,16 +10,19 @@
  *   那在磁盘上是两个文件,所以要**先写新的、再删旧的**。
  *
  * ★ 内置角色(general-purpose 等)没有源文件,点开走的是**只读详情页**
- *   (照 `ModesPanel` 的 `BuiltinModeView` 范式),唯一可改的字段是模型:
- *   写进 `settings.subagent.modelOverrides`,读写走 `services/app.ts` 的
+ *   (照 `ModesPanel` 的 `BuiltinModeView` 范式),可改的是**两张按角色覆盖表**:
+ *   模型写进 `settings.subagent.modelOverrides`、思考深度写进
+ *   `settings.subagent.thinkingOverrides`,读写走 `services/app.ts` 的
  *   `getSettings`/`updateSettings`(扩展面板不是设置页,拿不到 props)。
  */
 import { ArrowLeft, Bot } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentListItem, MarkdownResourceFile } from '../../../../../shared/domain/markdown-resource'
 import type { ModelAlias, UpstreamProvider } from '../../../../../shared/domain/provider'
+import { INHERIT_THINKING, SUBAGENT_THINKING_CHOICES, isSubagentThinking, type SubagentThinking } from '../../../../../shared/domain/subagent-thinking'
 import { IconButton } from '../../../components/ui/IconButton'
 import { RoleModelPicker } from '../../../components/RoleModelPicker'
+import { Select } from '../../../components/ui/Select'
 import { useI18n } from '../../../i18n'
 import { listAgents, onAgentsChanged, setAgentEnabled } from '../../../services/agents'
 import { getSettings, updateSettings } from '../../../services/app'
@@ -200,10 +203,11 @@ export function AgentsPanel(): ReactNode {
 /**
  * 内置角色的只读详情页(照 `ModesPanel` 的 `BuiltinModeView` 范式)。
  *
- * ★ 一切只读,唯独模型可改:改的是 `settings.subagent.modelOverrides[name]`,
- *   **只发单个条目** —— 后端 `mergeSubagentModelOverrides` 按 key 合并,
- *   patch 里没出现的角色原样保留。空值(`model: ''`)= 跟随默认子代理,
- *   合并时会把这个键从表里剪掉。
+ * ★ 一切只读,唯独两张「按角色覆盖」表可改:模型改
+ *   `settings.subagent.modelOverrides[name]`、思考深度改
+ *   `settings.subagent.thinkingOverrides[name]`。两者都**只发单个条目** ——
+ *   后端合并按 key 合并,patch 里没出现的角色原样保留。清空覆盖时模型发空
+ *   `model`、思考深度发 `INHERIT_THINKING`,合并时都会把这个键从表里剪掉。
  */
 function BuiltinAgentView({
   agent,
@@ -220,38 +224,68 @@ function BuiltinAgentView({
 }): ReactNode {
   const { t } = useI18n()
   /*
-    ★ 模型覆盖在本页持一份本地快照:打开时从 `getSettings()` 读一次,改动后
+    ★ 覆盖在本页持一份本地快照:打开时从 `getSettings()` 读一次,改动后
     乐观覆盖。不直接订阅全量 settings —— 扩展面板拿不到设置 props,而只为
-    一个下拉订阅全局广播会把每次无关的设置写入都变成这里的一次重渲染。
-    写失败时清掉快照,下拉退回「跟随默认子代理」并 toast 说明没存上。
+    两个下拉订阅全局广播会把每次无关的设置写入都变成这里的一次重渲染。
+    写失败时退回**本字段**读到的快照并 toast 说明没存上。
   */
-  const [override, setOverride] = useState<{ model: string; modelProviderId?: string } | undefined>(undefined)
+  const [override, setOverride] = useState<{ model: string; modelProviderId?: string; thinking: SubagentThinking } | undefined>(undefined)
   const [loadedOverride, setLoadedOverride] = useState(false)
   /*
-    ★ 用户一旦碰过下拉,打开时那次 `getSettings()` 的迟到结果就不许再写 `override`
-    —— 否则用户在 IPC 往返之前选的模型,会被旧快照覆盖回旧值(库里是新的,
-    界面显示旧的,退回快照的失败分支还会把它写成错的)。换角色时重置。
+    ★ `touched` 按**字段**隔离:用户碰了模型下拉,不该让迟到的思考深度快照也一起
+    被丢掉 —— 整页一个开关时,先碰任一下拉会让另一个字段在整个挂载期间都显示成
+    「继承默认」,而库里其实存着覆盖。字段各管各的,迟到的真值只补没被碰过的那一栏。
   */
-  const touched = useRef(false)
+  const touchedModel = useRef(false)
+  const touchedThinking = useRef(false)
   useEffect(() => {
-    touched.current = false
+    touchedModel.current = false
+    touchedThinking.current = false
     let alive = true
     void getSettings()
-      .then((s) => { if (alive && !touched.current) setOverride(s.subagent.modelOverrides[agent.name]) })
+      .then((s) => {
+        if (!alive) return
+        const savedModel = s.subagent.modelOverrides[agent.name]
+        const savedThinking = s.subagent.thinkingOverrides[agent.name]
+        // ★ 函数式合并:被碰过的字段保留当下乐观值,没碰过的才用迟到的真值补。
+        setOverride((o) => ({
+          model: touchedModel.current ? o?.model ?? '' : savedModel?.model ?? '',
+          modelProviderId: touchedModel.current ? o?.modelProviderId : savedModel?.modelProviderId,
+          thinking: touchedThinking.current ? o?.thinking ?? INHERIT_THINKING : savedThinking ?? INHERIT_THINKING
+        }))
+      })
       .catch(() => { if (alive) setLoadedOverride(true) })
       .finally(() => { if (alive) setLoadedOverride(true) })
     return () => { alive = false }
   }, [agent.name])
 
   const changeModel = (model: string, modelProviderId: string | undefined): void => {
-    touched.current = true
-    // ★ 先乐观更新本页(下拉立刻反映选择),再落库;失败时退回读到的快照并 toast。
+    touchedModel.current = true
+    // ★ 先乐观更新本页(下拉立刻反映选择),再落库;失败时**只回退模型字段**,
+    //   保留当下的思考字段 —— 一个下拉写失败不该把另一个已成功(或正在乐观显示)
+    //   的选择一起抹掉。
     const previous = override
-    setOverride({ model, modelProviderId })
+    setOverride((o) => ({ model, modelProviderId, thinking: o?.thinking ?? INHERIT_THINKING }))
     void updateSettings({ subagent: { modelOverrides: { [agent.name]: { model, modelProviderId } } } })
       .catch(() => {
         toast.error(t('ext.error.saveFailed'))
-        setOverride(previous)
+        setOverride((o) => ({
+          model: previous?.model ?? '',
+          modelProviderId: previous?.modelProviderId,
+          thinking: o?.thinking ?? INHERIT_THINKING
+        }))
+      })
+  }
+
+  const changeThinking = (value: SubagentThinking): void => {
+    touchedThinking.current = true
+    // ★ 同理只回退本字段:思考写失败时不该把模型的乐观选择一起带走。
+    const previousThinking = override?.thinking ?? INHERIT_THINKING
+    setOverride((o) => ({ ...(o ?? { model: '' }), thinking: value }))
+    void updateSettings({ subagent: { thinkingOverrides: { [agent.name]: value } } })
+      .catch(() => {
+        toast.error(t('ext.error.saveFailed'))
+        setOverride((o) => ({ ...(o ?? { model: '' }), thinking: previousThinking }))
       })
   }
 
@@ -294,6 +328,20 @@ function BuiltinAgentView({
             </div>
             {!loadedOverride && <p className="mt-1 text-[11px] text-fg-faint">{t('common.loading')}</p>}
             <p className="mt-2 text-[11px] text-fg-faint">{t('ext.agents.builtinModelHint')}</p>
+          </div>
+          <div className="mt-4">
+            <h2 className="mb-1 text-[12px] font-medium text-fg">{t('ext.field.thinking')}</h2>
+            <Select
+              value={override?.thinking ?? INHERIT_THINKING}
+              options={SUBAGENT_THINKING_CHOICES.map((value) => ({
+                value,
+                label: value === INHERIT_THINKING ? t('ext.field.inheritDefault') : t(`chat.thinkingLevel.${value}`)
+              }))}
+              onValueChange={(v) => { if (isSubagentThinking(v)) changeThinking(v) }}
+              ariaLabel={t('ext.field.thinking')}
+              className="max-w-[320px]"
+            />
+            <p className="mt-2 text-[11px] text-fg-faint">{t('ext.agents.builtinThinkingHint')}</p>
           </div>
         </div>
       </div>

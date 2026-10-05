@@ -290,12 +290,14 @@ beforeEach(() => {
     空 model(`mergeSettings` 会把 trim 后为空的条目删掉)。
   */
   const staleOverrides = store.getSettings().subagent.modelOverrides
+  const staleThinkingOverrides = store.getSettings().subagent.thinkingOverrides
   store.updateSettings({
     subagent: {
       model: '',
       modelProviderId: undefined,
       thinking: 'inherit',
-      modelOverrides: Object.fromEntries(Object.keys(staleOverrides).map((role) => [role, { model: '' }]))
+      modelOverrides: Object.fromEntries(Object.keys(staleOverrides).map((role) => [role, { model: '' }])),
+      thinkingOverrides: Object.fromEntries(Object.keys(staleThinkingOverrides).map((role) => [role, 'inherit']))
     }
   })
 })
@@ -657,6 +659,18 @@ describe('子代理继承思考深度', () => {
 
     expect(seen[0]?.model).toBe(NARROW_ALIAS)
     expect(seen[0]?.thinking).toBe('auto')
+  })
+
+  it('★ 按角色覆盖:该角色在 thinkingOverrides 里配了档位时,子 run 用它盖过默认栏', async () => {
+    store.updateSettings({ subagent: { thinking: 'low', thinkingOverrides: { 'general-purpose': 'high' } } })
+    const seen = captureChildReq()
+    const r = req({ thinking: 'medium' })
+
+    startRun(r, fakeWindow().ctx)
+    await waitForEnd(r.runId)
+
+    // DEMO 别名无 thinkingConfig、放行全档,不会被归一化降级
+    expect(seen[0]?.thinking).toBe('high')
   })
 })
 

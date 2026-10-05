@@ -7,7 +7,9 @@
 import type {
   GitBranchSummary,
   GitCommitSummary,
+  GitConflictResolution,
   GitDiff,
+  GitMergeResult,
   GitOverview
 } from '../../../shared/domain/git'
 import { invoke } from './ipc'
@@ -69,4 +71,29 @@ export function pushGit(workspaceId: string): Promise<void> {
  */
 export function generateGitCommitMessage(workspaceId: string): Promise<{ message: string }> {
   return invoke('git:generateCommitMessage', { workspaceId })
+}
+
+/**
+ * 把 `branch` 合并进当前分支。
+ *
+ * ★ 返回的是**结果类型**而不是 `void`:git 把「干净合并」和「停下来等你解决冲突」
+ *   当成两件不同的事说,面板也得据此分别回话 —— 前者是一条 notice,后者要把横幅
+ *   升起来。丢弃这个返回值等于把「有冲突」降级成一次刷新后自己猜。
+ */
+export function mergeGit(workspaceId: string, branch: string): Promise<GitMergeResult> {
+  return invoke('git:merge', { workspaceId, branch })
+}
+
+export function abortGitMerge(workspaceId: string): Promise<void> {
+  return invoke('git:abortMerge', { workspaceId })
+}
+
+/**
+ * 让模型逐个解决冲突文件。
+ *
+ * 不抛错而是逐文件回报 `resolved` / `failed`:二进制、超大、双方删除这些本来就
+ * 不该由 AI 硬猜,一次调用里混着成功和失败是正常结果,不是一个错误。
+ */
+export function resolveGitConflicts(workspaceId: string): Promise<GitConflictResolution[]> {
+  return invoke('git:resolveConflicts', { workspaceId })
 }

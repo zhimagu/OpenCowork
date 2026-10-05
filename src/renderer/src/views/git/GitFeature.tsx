@@ -42,7 +42,9 @@ import {
   ArrowDown,
   ArrowUp,
   GitBranch,
+  GitMerge,
   History,
+  MessageSquarePlus,
   Minus,
   Plus,
   RefreshCw,
@@ -53,12 +55,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type {
   GitBranchSummary,
   GitCommitSummary,
+  GitConflictFailure,
+  GitConflictResolution,
   GitDiff,
   GitFileChange,
+  GitMergeResult,
+  GitOperation,
   GitOverview,
   GitUnavailableReason
 } from '../../../../shared/domain/git'
 import { Button } from '../../components/ui/Button'
+import { Dialog } from '../../components/ui/Dialog'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { IconButton } from '../../components/ui/IconButton'
 import { Segmented } from '../../components/ui/Segmented'
@@ -66,10 +73,11 @@ import { Select } from '../../components/ui/Select'
 import { Spinner } from '../../components/ui/Spinner'
 import { TextInput } from '../../components/ui/TextInput'
 import { Toggle } from '../../components/ui/Toggle'
-import { useI18n, type Translate } from '../../i18n'
+import { useI18n, type TranslationKey, type Translate } from '../../i18n'
 import { cn } from '../../lib/cn'
 import { iconFor } from '../../lib/file-icon'
 import {
+  abortGitMerge,
   checkoutGitBranch,
   commitGit,
   createGitBranch,
@@ -78,12 +86,17 @@ import {
   getGitOverview,
   listGitBranches,
   listGitCommits,
+  mergeGit,
   pullGit,
   pushGit,
+  resolveGitConflicts,
   stageGitPaths,
   unstageGitPaths
 } from '../../services/git'
+import { createSession } from '../../services/sessions'
 import { FeatureFrame } from '../../shell/FeatureFrame'
+import { sessionStore } from '../../stores/session'
+import { useTabsStore } from '../../stores/tabs'
 import { useWindowStore } from '../../stores/window'
 import { DiffLines } from '../../components/diff/DiffLines'
 import { parseUnifiedDiff } from '../../components/diff/parse-unified'
@@ -101,6 +114,9 @@ const KNOWN_ERROR_KEYS = [
   'git.invalidPath',
   'git.detachedPush',
   'git.emptyMessage',
+  'git.mergeFailed',
+  'git.abortMergeFailed',
+  'git.mergeInProgress',
   'git.unavailable.remote-workspace',
   'git.unavailable.workspace-unavailable',
   'git.unavailable.git-missing',
@@ -114,8 +130,42 @@ type HintedReason = Exclude<GitUnavailableReason, 'git-missing'>
 
 type Pane = 'changes' | 'history'
 /** 哪一颗按钮该转圈。别的写操作很快,不值得一个指示器。 */
-type Pending = 'pull' | 'push'
+type Pending = 'pull' | 'push' | 'merge'
 type Selection = { path: string; staged: boolean }
+
+/**
+ * AI 解决不了冲突的那几种原因,各自的人话。
+ *
+ * ★ 表而不是 `t(\`git.resolveFailed.${reason}\`)`:`TranslationKey` 是字面量联合,
+ *   模板字面量拼出来的 `string` 进不去,那条写法在编译期就是错的(仓库里
+ *   `ToolTimeline.tsx:274` 用的是同一张表的做法)。
+ */
+const RESOLVE_FAILURE_KEYS = {
+  binary: 'git.resolveFailed.binary',
+  tooLarge: 'git.resolveFailed.tooLarge',
+  deleted: 'git.resolveFailed.deleted',
+  unresolved: 'git.resolveFailed.unresolved',
+  aiFailed: 'git.resolveFailed.aiFailed',
+  limit: 'git.resolveFailed.limit',
+  changed: 'git.resolveFailed.changed',
+  symlink: 'git.resolveFailed.symlink',
+  stageFailed: 'git.resolveFailed.stageFailed'
+} as const satisfies Record<GitConflictFailure, TranslationKey>
+
+/** 失败原因 → 文案键。主进程万一给出表里没有的原因,退到 `unresolved`(也是句人话)。 */
+function resolveFailureKey(reason: GitConflictFailure | undefined): TranslationKey {
+  return RESOLVE_FAILURE_KEYS[reason ?? 'unresolved'] ?? RESOLVE_FAILURE_KEYS.unresolved
+}
+
+/**
+ * 冲突清零之后该说什么。
+ *
+ * ★ merge 的出路是提交,rebase / cherry-pick 的出路是回终端 `--continue` —— 说反了
+ *   用户会卡在同一个地方两次。横幅和 AI 解决后的 notice 共用这一份,两处不说两套话。
+ */
+function resolvedCopy(operation: GitOperation, t: Translate): string {
+  return operation === 'merge' ? t('git.mergeConflictsResolved') : t('git.operationResolved', { operation })
+}
 
 const HISTORY_LIMIT = 50
 
@@ -178,10 +228,35 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
   /** 正在跑的是哪一个写操作 —— 只为了把转圈画在**被点的那颗按钮**里。 */
   const [pending, setPending] = useState<Pending | null>(null)
   const [generating, setGenerating] = useState(false)
+  /*
+    AI 解决冲突期间。**独立于 `busy`** —— 照 `generating` 那条路子:它一次调用
+    什么都不提交(改的是工作区文件),不该顺手把整个面板锁成「别的写操作都别点」。
+    只锁合并 / 中止 / AI 这三颗,重跑同一件事没有意义。
+  */
+  const [resolving, setResolving] = useState(false)
+  /** 上一次 AI 解决冲突里失败的那几项,列在横幅上。新一次合并 / 中止合并时清掉。 */
+  const [resolveFailures, setResolveFailures] = useState<GitConflictResolution[]>([])
+  /** 合并对话框:打开着 + 选中的来源分支 */
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [mergeSource, setMergeSource] = useState('')
+  const [abortOpen, setAbortOpen] = useState(false)
+  /** 建会话 + 预填草稿期间(防连点,独立于 `busy` —— 它不改仓库) */
+  const [handoff, setHandoff] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  // 并发刷新的版本号:切工作区 / 连点刷新时,只有最后一次的结果准落地
+  // 并发刷新的版本号:连点刷新时,只有最后一次的结果准落地
   const loadVersion = useRef(0)
+  /*
+    ★ **两个守卫管的是两件不同的事**:`loadVersion` 防**乱序**(同一工作区里两次刷新
+      谁后落地),`workspaceIdRef` 防**跨工作区** —— 版本号只比「谁新」,不比「是谁」:
+      切了工作区之后,旧闭包(轮询 / resolve / run)手里那个 `workspaceId` 还是旧仓库,
+      它回来时 `loadVersion` 也可能恰好仍然相等(新一轮刷新还没 bump),于是旧仓库的
+      overview 会灌进新工作区的面板,直到 15 秒后轮询把它盖回来。
+    渲染期同步(和 Dialog 里那个 `onCloseRef` 同一手法):effect 里同步会晚一拍,
+    而这一守卫要的恰恰是"切了就走"。
+  */
+  const workspaceIdRef = useRef(workspaceId)
+  workspaceIdRef.current = workspaceId
   // 轮询回调里读 busy —— 放进 effect 的依赖会让定时器每次置忙都重建一遍
   const busyRef = useRef(false)
   /*
@@ -198,15 +273,19 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
 
   /** `silent` 是给轮询用的:后台刷新失败不该往界面上糊一条用户没招来的红字。 */
   const refresh = useCallback(
-    async (silent = false): Promise<void> => {
+    async (silent = false): Promise<GitOverview | null> => {
+      // ★ 入口先验身份(在 bump 之前):跨工作区的旧闭包既不该落 state,也不该
+      //   bump 版本号把新工作区正在路上的那次刷新顶掉
+      if (workspaceIdRef.current !== workspaceId) return null
       if (workspaceId === null) {
         setOverview(null)
-        return
+        return null
       }
       const version = ++loadVersion.current
       try {
         const next = await getGitOverview(workspaceId)
-        if (version !== loadVersion.current) return
+        if (version !== loadVersion.current) return null
+        if (workspaceIdRef.current !== workspaceId) return null
         setOverview(next)
         const sign = next.available
           ? `${next.branch}\u0000${next.files.map((f) => `${f.path}${f.index}${f.worktree}`).join('\n')}`
@@ -218,14 +297,18 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
         if (!next.available) {
           setBranches([])
           setCommits([])
-          return
+          return next
         }
         const list = await listGitBranches(workspaceId)
-        if (version !== loadVersion.current) return
+        if (version !== loadVersion.current) return null
+        if (workspaceIdRef.current !== workspaceId) return null
         setBranches(list)
+        return next
       } catch (e) {
-        if (version !== loadVersion.current || silent) return
+        if (version !== loadVersion.current || silent) return null
+        if (workspaceIdRef.current !== workspaceId) return null
         setError(errorText(e, t))
+        return null
       }
     },
     [workspaceId, t]
@@ -236,6 +319,9 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
     setDiff(null)
     setCommits([])
     setPane('changes')
+    setMergeOpen(false)
+    setAbortOpen(false)
+    setResolveFailures([])
     signature.current = ''
     void refresh()
   }, [refresh])
@@ -303,8 +389,13 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
    * ★ `tag` 只影响转圈画在哪 —— `busy` 仍然是全局的(同时 pull 和 commit 没有
    *   任何意义),但 pull / push 一等就是几十秒,把指示器画在别处等于没画。
    */
+  /*
+    ★ AI 解决冲突期间也挡:它一边改工作树文件一边 `git add`,同一时刻再跑一次
+      checkout / commit / stage 就是让两个写者抢同一个索引。`resolve()` 自己不走
+      这里(它不该被自己挡死),所以这条守卫不会误锁它。
+  */
   const run = async (action: () => Promise<void>, tag?: Pending): Promise<void> => {
-    if (busy) return
+    if (busy || resolving) return
     setBusy(true)
     busyRef.current = true
     setPending(tag ?? null)
@@ -323,8 +414,27 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
   }
 
   const files = overview !== null && overview.available ? overview.files : []
+  /*
+    ★ 冲突文件既不在 `staged` 也不在 `unstaged` 里 —— 主进程的 `change()` 给两者的
+      条件都带 `!conflicted`(冲突文件没有「已暂存的改动」这回事)。所以它们**必须
+      单列一组**,否则用户点开面板只看到「没有改动」,而仓库正卡在冲突上。
+  */
+  const conflicted = useMemo(() => files.filter((f) => f.conflicted), [files])
   const staged = useMemo(() => files.filter((f) => f.staged), [files])
   const unstaged = useMemo(() => files.filter((f) => f.unstaged || f.untracked), [files])
+  /*
+    ★ 失败清单是**上一轮 AI 的产物**,而它会比冲突本身活得更久:用户手动解决掉一个
+      文件、或轮询刷过来一个中间态之后,`resolveFailures` 里那条记录还在 state 上
+      (state 的清理时机只有新一次合并 / 中止 / 切工作区)。所以**展示**和**主次判断**
+      都必须按「现在还冲突的那些路径」过滤,否则横幅会列出一串早就没冲突的文件,
+      而 `sessionPrimary` 会因为一条陈旧记录把 AI 按钮错误地降级。
+    state 本身不动 —— 留着它,用户把一个文件改回冲突态时原因还能重新显示出来。
+  */
+  const conflictedPathSet = useMemo(() => new Set(conflicted.map((f) => f.path)), [conflicted])
+  const activeFailures = useMemo(
+    () => resolveFailures.filter((r) => conflictedPathSet.has(r.path)),
+    [resolveFailures, conflictedPathSet]
+  )
 
   if (workspaceId === null) {
     return (
@@ -376,6 +486,37 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
   const branchOptions = branches.map((b) => ({ value: b.name, label: b.name }))
   const selectValue = branches.some((b) => b.name === overview.branch) ? overview.branch : ''
 
+  const conflictedCount = conflicted.length
+  /*
+    仓库卡住的那次操作,由主进程读 MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD 得出;
+    `mergeSource` 是它从 .git/MERGE_MSG 解析出的来源分支。
+    ★ 渲染层不留任何「我正在合并」的本地状态:用户在终端里 `git merge --abort` 或
+      `rebase --continue`,只有这两个字段跟着刷新一变,横幅才会跟着换话。
+  */
+  const operation = overview.operation
+  const mergeSourceOfOperation = overview.mergeSource
+  const sourceOptions = branches.filter((b) => !b.current).map((b) => ({
+    value: b.name,
+    label: b.name
+  }))
+  /**
+   * 对话框里默认选中的来源分支,同时兼作入口按钮的可用性依据:空串 = 没有可合并的
+   * 分支。★ 从 `branches` 现取而不是 `sourceOptions[0]?.value` —— 项目开了
+   * noUncheckedIndexedAccess,下标取出来的东西带 undefined,而这里要的只是个
+   * 「有没有得选」的判断。
+   */
+  const mergeSourceName = branches.find((b) => !b.current)?.name ?? ''
+
+  /*
+    AI 报过「这几个不是重试能解决的」(太大 / 二进制 / 双方删除)且**所有还挂着冲突的**
+    失败都是这一类时,把会话入口提为主按钮。混着 aiFailed / limit 那种「再点一次有可能
+    成」的,维持 AI 为主。★ 用 `activeFailures` 而不是原始 state(见那里的注释)。
+  */
+  const manualOnlyReasons: readonly GitConflictFailure[] = ['tooLarge', 'binary', 'deleted']
+  const sessionPrimary =
+    activeFailures.length > 0 &&
+    activeFailures.every((r) => manualOnlyReasons.includes(r.reason ?? 'unresolved'))
+
   const commit = (): void => {
     const text = message.trim()
     // 按钮在空信息时就是禁用的,这里兜的是 ⌘↵ —— 快捷键绕不过键盘
@@ -418,6 +559,191 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
     })
   }
 
+  /**
+   * 合并来源分支。
+   *
+   * ★ `run` 会丢掉 action 的返回值,所以 notice 在闭包内自己发。冲突清单和来源分支
+   *   都不在这里往 state 上存 —— `run` 收尾那次刷新已经把 `operation` /
+   *   `mergeSource`(主进程读 .git/MERGE_MSG)和冲突文件带进 `overview` 了,横幅和
+   *   会话提示词都从那儿读,少两份会和刷新打架的本地状态。
+   */
+  const merge = (source: string): void => {
+    void run(
+      async () => {
+        // 上一轮 AI 的失败清单不属于这一次合并,开跑前先清掉
+        setResolveFailures([])
+        try {
+          const result: GitMergeResult = await mergeGit(workspaceId, source)
+          if (result.status === 'merged') setNotice(t('git.mergeDone', { branch: source }))
+          else if (result.status === 'upToDate') setNotice(t('git.mergeUpToDate', { branch: source }))
+          // 判别式联合:上两条分支排掉 merged / upToDate,这里 `paths` 可达
+          else setNotice(t('git.mergeConflicted', { count: result.paths.length }))
+        } finally {
+          // ★ 失败也关:弹窗是 `z-100` 盖住整个窗口的,留着它用户就看不见
+          //   banner 上那条「合并失败」以及 git 的原话了。
+          setMergeOpen(false)
+        }
+      },
+      'merge'
+    )
+  }
+
+  const abortMerge = (): void => {
+    void run(async () => {
+      try {
+        await abortGitMerge(workspaceId)
+        // 失败清单跟着这次合并一起没了(来源分支由主进程刷掉,不在这里清)
+        setResolveFailures([])
+      } finally {
+        setAbortOpen(false)
+      }
+    })
+  }
+
+  /**
+   * 让 AI 逐个解决冲突文件。照 `generate()`:独立 loading、成功后自己刷一遍、
+   * 失败进现有 error banner,全程不碰 `busy`。
+   *
+   * ★ 失败的项**留在 state 上按路径列出来**,而不是拼成一句 notice:二进制 / 双方
+   *   删除这些是要用户自己去决定的,告诉他「有 3 个没解决」不如告诉他哪三个、
+   *   以及各自为什么。下一次点击会整份覆盖。
+   */
+  const resolve = (): void => {
+    if (busy || resolving) return
+    setResolving(true)
+    setError(null)
+    setNotice(null)
+    resolveGitConflicts(workspaceId)
+      .then(async (list) => {
+        // ★ 跨工作区:旧工作区的 resolve 跑完,新面板已经换人了 —— 不刷、不写清单、
+        //   不报 notice(错误也不糊到别的仓库的界面上)
+        if (workspaceIdRef.current !== workspaceId) return
+        const next = await refresh()
+        // await 期间又切了一次:refresh 自己会把结果扣下(返回 null),这里连清单
+        // 和 notice 也不该写 —— 与 refresh 里每个 await 之后重验是同一个理由
+        if (workspaceIdRef.current !== workspaceId) return
+        const failed = list.filter((r) => r.status === 'failed')
+        setResolveFailures(failed)
+        /*
+          ★ 「已解决」必须建立在**确认过的**仓库状态上:`refresh()` 返回 null 可能是
+            静默失败,也可能被版本号顶掉或整个跨了工作区,那不代表冲突清零。拿不到
+            新状态时不宣告,让失败自己说话(错误已进 error banner)。
+        */
+        if (next !== null && next.available) {
+          const left = next.files.filter((f) => f.conflicted).length
+          /*
+            ★ 用 `next.operation` 而不是渲染时那份:这一句要说的是**刚刷出来的**仓库
+              该往哪走。squash / revert 停在中间时没有 operation 哨兵,但冲突解决完
+              的下一步仍然是提交 —— 给一句中性提示,而不是什么都不说(L5)。
+              期间被终端 abort 的干净仓库(没有任何已暂存改动)不发消息。
+          */
+          if (left === 0) {
+            if (next.operation !== '') setNotice(resolvedCopy(next.operation, t))
+            else if (next.files.some((f) => f.staged)) setNotice(t('git.conflictsResolvedHint'))
+          } else if (failed.length > 0) {
+            setNotice(t('git.resolvePartial'))
+          }
+        } else if (failed.length > 0) {
+          setNotice(t('git.resolvePartial'))
+        }
+      })
+      .catch((e: unknown) => {
+        if (workspaceIdRef.current !== workspaceId) return
+        setError(errorText(e, t))
+      })
+      .finally(() => setResolving(false))
+  }
+
+  /**
+   * 把这次冲突转交给一条 Agent 会话:开新会话 + 把需求**预填进输入框**,不发送。
+   *
+   * ★ 为什么需要它:one-shot 的 AI 解决有 128KB 上限(`tooLarge`),而带工具的
+   *   会话可以分块读完整大文件。用户自己挑模型、自己按发送。
+   *
+   * ★ **顺序:create → openSession → setDraft,而且 draft 不会被回填盖掉。**
+   *   `sessionStore(id)` 第一次被碰到时会异步跑 `hydrateInput`(读盘上存档)。
+   *   这里 setDraft 是在同一拍里同步写进 store 的,等那次 IPC 回来,守卫
+   *   `s.draft !== ''` 直接 return —— 这正是那条守卫存在的理由(见 store 内注释)。
+   *   新会话本来也没有存档,双重安全。反过来先 setDraft 再 openSession 不会错,
+   *   但照 `startSkillExtraction` 的编排走,两处时序一致好维护。
+   */
+  const openConflictSession = (): void => {
+    // ★ 不看 `resolving`:AI 失败清单里那几颗(tooLarge / binary)正是会话要去接手的活
+    if (busy || handoff) return
+    setHandoff(true)
+    setError(null)
+    const fileList = conflicted
+      .map((f) => {
+        const failed = activeFailures.find((r) => r.path === f.path)
+        return failed === undefined ? f.path : `${f.path} — ${t(resolveFailureKey(failed.reason))}`
+      })
+      .join('\n')
+    // 提示词在点击这一刻现算:之后的 IPC 往返里界面上的清单不该再变
+    const prompt = t('git.conflictSessionPrompt', {
+      /*
+        ★ 两个参数都取自刷出来的 `overview`:会话里那条 Agent 得知道自己收尾的
+          是 merge 还是 rebase(出路不同:合并提交 vs `git rebase --continue`),
+          而来源分支只有主进程能从 .git/MERGE_MSG 读到。措辞由模板按
+          operation 分派,这里只送原始值。
+      */
+      operation,
+      branch: mergeSourceOfOperation,
+      count: conflictedCount,
+      files: fileList
+    })
+    createSession(workspaceId, t('git.conflictSessionTitle'))
+      .then((session) => {
+        // ★ 跨工作区:会话建在旧工作区不假,但**不能**切走用户现在看的视图
+        //   (不 openSession、不抢焦点);草稿照写 —— 他之后自己点开那条会话时,
+        //   需求描述还在里面。同一次会话、同一份草稿,只差「要不要现在跳过去」。
+        if (workspaceIdRef.current === workspaceId) {
+          useTabsStore.getState().openSession(workspaceId, session.id, session.title)
+        }
+        sessionStore(session.id).getState().setDraft(prompt)
+      })
+      .catch((e: unknown) => {
+        if (workspaceIdRef.current !== workspaceId) return
+        setError(errorText(e, t))
+      })
+      .finally(() => setHandoff(false))
+  }
+
+  /*
+    ★ 定义成 const 而不是写两遍 JSX:上面要根据失败原因**换序并换主次**,同一段
+      UI 抄两遍的话,改一处漏一处的症状是「换了序的那颗忘了禁用 resolving」。
+    ★ 换序走数组渲染,两颗都带 key —— 没 key 时 React 按位置复用,换序会把 Spinner
+      状态串到另一颗按钮上。
+  */
+  const aiButton = (
+    <Button
+      key="ai"
+      size="sm"
+      variant={sessionPrimary ? 'ghost' : 'accent'}
+      disabled={busy || resolving}
+      icon={resolving ? <Spinner size="sm" /> : <Sparkles size={13} />}
+      onClick={resolve}
+    >
+      {resolving ? t('git.resolving') : t('git.resolveWithAi')}
+    </Button>
+  )
+  /*
+    转交给会话处理:one-shot AI 啃不动的大文件(>128KB)走这条路 —— 带工具的
+    Agent 能分块读完。只建会话、只填输入框,发送和选模型留给用户。
+    ★ 它**不跟 resolving 互斥**:不改仓库,而且 AI 刚失败的那些正是它要去接手的。
+  */
+  const sessionButton = (
+    <Button
+      key="session"
+      size="sm"
+      variant={sessionPrimary ? 'accent' : 'ghost'}
+      disabled={busy || handoff}
+      icon={handoff ? <Spinner size="sm" /> : <MessageSquarePlus size={13} />}
+      onClick={openConflictSession}
+    >
+      {t('git.openInSession')}
+    </Button>
+  )
+
   return (
     <Shell t={t} onClose={onClose} onRefresh={() => void refresh()}>
       <section className="flex w-[340px] shrink-0 flex-col border-r border-hairline">
@@ -443,11 +769,12 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
             )}
           </div>
           <div className="mt-2.5 flex items-center gap-2">
+            {/* pull 会动工作树,AI 正在改写冲突文件时不能并行 —— push 只读,不锁 */}
             <Button
               size="sm"
               variant="ghost"
               icon={pending === 'pull' ? <Spinner size="sm" /> : <ArrowDown size={13} />}
-              disabled={busy}
+              disabled={busy || resolving}
               onClick={() => void run(() => pullGit(workspaceId), 'pull')}
             >
               {t('git.pull')}
@@ -465,10 +792,37 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
               label={t('git.newBranch')}
               className="ml-auto"
               active={creating}
-              disabled={busy}
+              disabled={busy || resolving}
               onClick={() => setCreating((v) => !v)}
             >
               <Plus size={14} />
+            </IconButton>
+            {/*
+              合并入口。游离 HEAD 没有「当前分支」可当合并目标;仓库已经卡在一次
+              未完成操作(rebase / cherry-pick / 上一次合并)时再叠一次 merge 只会把
+              两件事搅在一起 —— 这两种情况直接不给按,而不是弹个对话框再让用户在
+              里面发现按不了「合并」。没有别的分支时也没的可合。
+              ★ 条件还要看 `conflictedCount > 0`:squash / revert 停在中间时没有任何
+              哨兵文件,`operation` 是空串,但索引里带着未合并路径 —— 那种状态下
+              `git merge` 会被 git 自己拒掉(主进程同样按 `git.mergeInProgress` 挡),
+              与其让用户看完一条红字,不如一开始就不给按。
+            */}
+            <IconButton
+              label={t('git.merge')}
+              disabled={
+                busy ||
+                resolving ||
+                overview.detached ||
+                operation !== '' ||
+                conflictedCount > 0 ||
+                mergeSourceName === ''
+              }
+              onClick={() => {
+                setMergeSource(mergeSourceName)
+                setMergeOpen(true)
+              }}
+            >
+              {pending === 'merge' ? <Spinner size="sm" /> : <GitMerge size={14} />}
             </IconButton>
           </div>
           {branchOptions.length > 0 && (
@@ -477,7 +831,7 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
               value={selectValue}
               options={branchOptions}
               ariaLabel={t('git.switchBranch')}
-              disabled={busy}
+              disabled={busy || resolving}
               onValueChange={(name) => {
                 if (name === overview.branch) return
                 void run(() => checkoutGitBranch(workspaceId, name))
@@ -491,7 +845,7 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
                 onChange={setNewBranch}
                 placeholder={t('git.newBranchPlaceholder')}
                 ariaLabel={t('git.newBranchName')}
-                disabled={busy}
+                disabled={busy || resolving}
               />
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-[12px] text-fg-muted">
@@ -502,7 +856,12 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
                   />
                   {t('git.newBranchCheckout')}
                 </span>
-                <Button size="sm" variant="accent" disabled={busy} onClick={createBranch}>
+                <Button
+                  size="sm"
+                  variant="accent"
+                  disabled={busy || resolving}
+                  onClick={createBranch}
+                >
                   {t('git.create')}
                 </Button>
               </div>
@@ -525,12 +884,31 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
             />
           ) : (
             <>
+              {/*
+                冲突组排在最前:它是**唯一需要用户决定**的那一栏,而暂存/未暂存
+                只是账本。空组由 `FileGroup` 自己 return null。
+                ★ `staged={false}`:主进程的 diff 特判(冲突文件返回带标记的工作区
+                原文)只在 `staged === false` 那条路上;传 true 会去读 `--cached`,
+                拿到的是三方合并的 index 内容而不是用户要看的那份。
+              */}
+              <FileGroup
+                t={t}
+                title={t('git.conflictGroup')}
+                files={conflicted}
+                staged={false}
+                busy={busy || resolving}
+                selection={selection}
+                actionLabel={t('git.stage')}
+                bulkLabel={t('git.stageAll')}
+                onSelect={setSelection}
+                onAction={(paths) => void run(() => stageGitPaths(workspaceId, paths))}
+              />
               <FileGroup
                 t={t}
                 title={t('git.staged')}
                 files={staged}
                 staged
-                busy={busy}
+                busy={busy || resolving}
                 selection={selection}
                 actionLabel={t('git.unstage')}
                 bulkLabel={t('git.unstageAll')}
@@ -542,7 +920,7 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
                 title={t('git.unstaged')}
                 files={unstaged}
                 staged={false}
-                busy={busy}
+                busy={busy || resolving}
                 selection={selection}
                 actionLabel={t('git.stage')}
                 bulkLabel={t('git.stageAll')}
@@ -559,7 +937,7 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
             value={message}
             placeholder={t('git.commitPlaceholder')}
             ariaLabel={t('git.commitMessage')}
-            disabled={busy || generating}
+            disabled={busy || generating || resolving}
             onChange={setMessage}
             onSubmit={commit}
           />
@@ -572,10 +950,14 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
                   : null}
             </span>
             <div className="flex shrink-0 items-center gap-1.5">
+              {/*
+                AI 生成提交信息读的是暂存区,不写仓库,但冲突正在被 AI 改写时暂存区
+                本身就不稳定 —— 生成的信息描述的是「上一秒的改动」。一起停掉。
+              */}
               <IconButton
                 label={t('git.aiGenerate')}
                 size={28}
-                disabled={busy || generating || staged.length === 0}
+                disabled={busy || generating || resolving || staged.length === 0}
                 onClick={generate}
               >
                 {generating ? <Spinner size="sm" /> : <Sparkles size={14} />}
@@ -583,7 +965,9 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
               <Button
                 size="sm"
                 variant="accent"
-                disabled={busy || generating || staged.length === 0 || message.trim() === ''}
+                disabled={
+                  busy || generating || resolving || staged.length === 0 || message.trim() === ''
+                }
                 onClick={commit}
               >
                 {t('git.commit')}
@@ -618,6 +1002,72 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
             </span>
           )}
         </div>
+
+        {/*
+          ── 未完成的 git 操作 / 待解决冲突横幅 ──
+          判据是 `overview.operation`(主进程读 MERGE_HEAD / REBASE_HEAD /
+          CHERRY_PICK_HEAD)+ 冲突文件数,**不是**渲染层自己记的「我刚点了合并」:
+          用户完全可能在终端里 `git merge --abort`,面板跟着刷掉才是对的。
+          ★ 条件带 `conflictedCount > 0` 这一半:rebase 停在中间时 MERGE_HEAD 不
+            存在,但冲突一样要解决、一样要给出入口。
+          ★ 中止按钮只在 `operation === 'merge'` 给 —— `git merge --abort` 打到
+            rebase 中间是会做错事的(rebase 要的是 --abort / --skip),而我们没有
+            把握替用户跑对的那条,宁可少给一颗按钮。
+        */}
+        {(operation !== '' || conflictedCount > 0) && (
+          <div className="px-4 pt-3">
+            <div
+              className={cn(
+                'rounded-[8px] border px-3 py-2.5 text-[12px]',
+                conflictedCount > 0
+                  ? 'border-danger/40 bg-danger/10 text-fg-muted'
+                  : 'border-hairline bg-tint text-fg-muted'
+              )}
+            >
+              <p className="flex items-start gap-2">
+                <GitMerge size={13} className="mt-0.5 shrink-0 text-fg-faint" />
+                <span className="min-w-0 break-words">
+                  {conflictedCount > 0
+                    ? t('git.conflictsPending', { count: conflictedCount })
+                    : resolvedCopy(operation, t)}
+                </span>
+              </p>
+              {/* AI 没解决掉的那些:路径 + 各自的原因。★ 只列**现在还在冲突**的那些 */}
+              {activeFailures.length > 0 && (
+                <ul className="mt-2 flex flex-col gap-1 border-t border-hairline pt-2">
+                  {activeFailures.map((r) => (
+                    <li key={r.path} className="flex min-w-0 items-baseline gap-2">
+                      <code
+                        className="min-w-0 shrink truncate font-mono text-[11px] text-fg"
+                        title={r.path}
+                      >
+                        {r.path}
+                      </code>
+                      <span className="shrink-0 text-[11px] text-danger">
+                        {t(resolveFailureKey(r.reason))}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-2 flex items-center gap-2">
+                {/* 失败引导换序:两类按钮在组件尾部现成 const,这里只决定谁在前、谁是主 */}
+                {conflictedCount > 0 &&
+                  (sessionPrimary ? [sessionButton, aiButton] : [aiButton, sessionButton])}
+                {operation === 'merge' && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy || resolving}
+                    onClick={() => setAbortOpen(true)}
+                  >
+                    {t('git.abortMerge')}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {(error !== null || notice !== null) && (
           <div className="px-4 pt-3">
@@ -672,6 +1122,61 @@ export function GitFeature({ onClose }: { onClose?: () => void } = {}): ReactNod
           )}
         </div>
       </section>
+
+      {/* ── 合并对话框 ── */}
+      <Dialog
+        open={mergeOpen}
+        title={t('git.mergeTitle')}
+        onClose={() => setMergeOpen(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMergeOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="accent"
+              disabled={busy || resolving || mergeSource === ''}
+              icon={pending === 'merge' ? <Spinner size="sm" /> : undefined}
+              onClick={() => merge(mergeSource)}
+            >
+              {t('git.mergeAction')}
+            </Button>
+          </>
+        }
+      >
+        <label className="block text-[12px] text-fg-muted">
+          {t('git.mergeSource')}
+          <Select
+            className="mt-1.5"
+            inModal
+            value={mergeSource}
+            options={sourceOptions}
+            ariaLabel={t('git.mergeSource')}
+            disabled={busy}
+            onValueChange={setMergeSource}
+          />
+        </label>
+      </Dialog>
+
+      {/* ── 中止合并:危险确认 ── */}
+      <Dialog
+        open={abortOpen}
+        title={t('git.abortMergeTitle')}
+        width={420}
+        onClose={() => setAbortOpen(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAbortOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" disabled={busy || resolving} onClick={abortMerge}>
+              {t('git.abortMerge')}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[12px] text-fg-muted">{t('git.abortMergeBody')}</p>
+      </Dialog>
     </Shell>
   )
 }

@@ -103,7 +103,14 @@ import type {
   DocumentViewTokenRequest
 } from '../document-engine/view'
 import type { BrowserChange, BrowserCuaEvent, BrowserProfile, BrowserTab } from '../domain/browser'
-import type { GitBranchSummary, GitCommitSummary, GitDiff, GitOverview } from '../domain/git'
+import type {
+  GitBranchSummary,
+  GitCommitSummary,
+  GitConflictResolution,
+  GitDiff,
+  GitMergeResult,
+  GitOverview
+} from '../domain/git'
 import type { ScheduledRun, ScheduledTask, ScheduledTaskInput } from '../domain/scheduled'
 import type {
   BackupStatus,
@@ -509,6 +516,12 @@ export interface IpcInvokeMap {
    *   的措辞,不是用哪家模型。
    */
   'git:generateCommitMessage': { req: { workspaceId: string }; res: { message: string } }
+  /** 把某个分支合并进当前分支。冲突是**一种结果**,不是错误。 */
+  'git:merge': { req: { workspaceId: string; branch: string }; res: GitMergeResult }
+  /** 中止一次进行中的合并,回到合并前的状态。 */
+  'git:abortMerge': { req: { workspaceId: string }; res: void }
+  /** 让 AI 逐个解决当前冲突文件并暂存。逐文件成败各自返回,不因单个失败中断。 */
+  'git:resolveConflicts': { req: { workspaceId: string }; res: GitConflictResolution[] }
 
   // ── 定时任务 ──
   'scheduled:listTasks': { req: { workspaceId?: string }; res: ScheduledTask[] }
@@ -1617,6 +1630,9 @@ export const INVOKE_CHANNELS = {
   'git:pull': 1,
   'git:push': 1,
   'git:generateCommitMessage': 1,
+  'git:merge': 1,
+  'git:abortMerge': 1,
+  'git:resolveConflicts': 1,
   'tabs:getInner': 1,
   'session:getInput': 1,
   'attachment:upload': 1,

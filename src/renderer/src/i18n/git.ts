@@ -114,7 +114,85 @@ export const gitZh = {
   'git.invalidBranch': '分支名不合法',
   'git.invalidPath': '文件路径不合法',
   'git.detachedPush': '当前是游离 HEAD,没有可推送的分支',
-  'git.emptyMessage': '提交信息不能为空'
+  'git.emptyMessage': '提交信息不能为空',
+
+  // ── 合并 ──
+  'git.merge': '合并分支',
+  'git.mergeTitle': '合并分支到当前分支',
+  'git.mergeSource': '来源分支',
+  'git.mergeAction': '合并',
+  'git.mergeDone': ({ branch }: Params) => `已将 ${branch} 合并到当前分支`,
+  'git.mergeUpToDate': ({ branch }: Params) => `当前分支已包含 ${branch} 的全部提交`,
+  'git.mergeConflicted': ({ count }: Params) =>
+    `合并产生 ${String(count)} 个冲突文件:可让 AI 解决,也可手动处理后提交`,
+  'git.mergeConflictsResolved': '冲突已全部解决,提交以完成合并',
+  // ── 未完成的 git 操作 / 待解决冲突(横幅与冲突分组) ──
+  'git.conflictGroup': '冲突',
+  'git.conflictsPending': ({ count }: Params) =>
+    `当前有 ${String(count)} 个文件冲突未解决:可让 AI 解决、转到会话,或手动处理后暂存`,
+  // rebase / cherry-pick 的出路是回终端 --continue:那两步会接着跑后面的提交,
+  // 面板里既没有「继续」按钮,也不该替用户猜下一个冲突在哪个 commit。
+  'git.operationResolved': ({ operation }: Params) =>
+    `冲突已解决,回终端执行 git ${operation} --continue`,
+  // squash / revert 停在中间时没有 operation 哨兵,但冲突解决完的下一步仍是提交
+  'git.conflictsResolvedHint': '冲突已解决,提交以完成',
+  'git.resolveWithAi': 'AI 解决冲突',
+  'git.openInSession': '在会话中解决',
+  // 标题不再写死「合并」:rebase / cherry-pick 停住时也能用这条路(提示词自己说清是哪种)
+  'git.conflictSessionTitle': '解决 Git 冲突',
+  // 预填进新会话输入框的需求描述(不自动发送)。★ 函数模板:
+  // - operation 决定开头那句怎么说、以及第 3 步的出路(合并提交 vs --continue);
+  // - 「来源分支」那半句只在 merge 时出现,读不到就说未知(rebase 没有来源分支这回事);
+  // - files 由调用方按行拼好(AI 失败过的路径附带原因);
+  // - 换行全用 \n 显式写,不让源码缩进混进提示词。
+  // ★ 第 1 步是护栏:Agent 有写权限,先让它把方案说出来等人确认,免得它一上来就
+  //   按自己的理解改文件 —— 冲突怎么合是用户的决定,不是它的。
+  'git.conflictSessionPrompt': ({ operation, branch, count, files }: Params) => {
+    const op = String(operation)
+    const head =
+      op === 'merge'
+        ? '当前仓库有一次未完成的合并'
+        : op === 'rebase'
+          ? '当前仓库有一次未完成的 rebase'
+          : op === 'cherry-pick'
+            ? '当前仓库有一次未完成的 cherry-pick'
+            : '当前仓库有一次未完成的 git 操作'
+    const source =
+      op !== 'merge' ? '' : String(branch) === '' ? '(来源分支未知)' : `(来源分支:${String(branch)})`
+    const finish =
+      op === 'rebase'
+        ? '3. 全部解决后运行 git rebase --continue;遇到下一个冲突按同样的流程处理。'
+        : op === 'cherry-pick'
+          ? '3. 全部解决后运行 git cherry-pick --continue。'
+          : '3. 全部解决后完成合并提交(沿用默认合并信息即可)。'
+    return (
+      `${head}${source},有 ${String(count)} 个冲突文件尚未解决:\n\n${String(files)}\n\n` +
+      '请按下面的流程解决这次冲突:\n' +
+      '1. 先完整阅读每个冲突文件(大文件也要读完),列出冲突点和你打算怎么解决,**先发给我确认,我确认之前不要改任何文件**。\n' +
+      '2. 我确认后:保留双方各自意图正确的改动,删除所有冲突标记(<<<<<<<、=======、|||||||、>>>>>>>),用 git add 暂存这些文件。\n' +
+      `${finish}遇到二进制文件或必须二选一的情况,先问我保留哪一侧。\n` +
+      '4. 不要改动与冲突无关的文件。'
+    )
+  },
+  'git.resolving': 'AI 正在解决冲突…',
+  'git.resolvePartial': '部分冲突未能自动解决,请手动处理',
+  'git.abortMerge': '中止合并',
+  'git.abortMergeTitle': '中止合并?',
+  'git.abortMergeBody': '本次合并的全部改动都会被丢弃,包含已经解决的冲突。',
+  // AI 解决不了的那几种各有各的原因,而且用户要做的事不一样:前两种是「只能手动」,
+  // 后两种是「可以重来」。合并成一句「解决失败」等于把可重试的说成不可重试的。
+  'git.resolveFailed.binary': '二进制文件冲突,需要手动处理',
+  'git.resolveFailed.tooLarge': '文件过大,未交给 AI,请手动解决',
+  'git.resolveFailed.deleted': '双方都删除了该文件,请手动确认保留还是删除',
+  'git.resolveFailed.unresolved': 'AI 未能给出可用的解决结果,请手动处理',
+  'git.resolveFailed.aiFailed': 'AI 调用失败,可重试或手动处理',
+  'git.resolveFailed.limit': '本次只处理了部分冲突文件,其余请再次点击或手动处理',
+  'git.resolveFailed.changed': '文件在 AI 解决期间被改动(或合并已中止),未覆盖,请手动检查',
+  'git.resolveFailed.symlink': '符号链接文件不自动改写,请手动处理',
+  'git.resolveFailed.stageFailed': '文件已解决但暂存失败,请手动暂存',
+  'git.mergeFailed': '合并失败',
+  'git.abortMergeFailed': '中止合并失败',
+  'git.mergeInProgress': '已有未完成的 git 操作,先处理它'
 }
 
 export const gitEn = {
@@ -204,5 +282,76 @@ export const gitEn = {
   'git.invalidBranch': 'Invalid branch name',
   'git.invalidPath': 'Invalid file path',
   'git.detachedPush': 'HEAD is detached — there is no branch to push',
-  'git.emptyMessage': 'The commit message cannot be empty'
+  'git.emptyMessage': 'The commit message cannot be empty',
+
+  'git.merge': 'Merge branch',
+  'git.mergeTitle': 'Merge a branch into the current branch',
+  'git.mergeSource': 'Source branch',
+  'git.mergeAction': 'Merge',
+  'git.mergeDone': ({ branch }: Params) => `Merged ${branch} into the current branch`,
+  'git.mergeUpToDate': ({ branch }: Params) =>
+    `The current branch already contains all commits from ${branch}`,
+  'git.mergeConflicted': ({ count }: Params) =>
+    `The merge produced ${String(count)} conflicted files. Resolve them with AI or fix them manually, then commit.`,
+  'git.mergeConflictsResolved': 'All conflicts resolved. Commit to finish the merge.',
+  'git.conflictGroup': 'Conflicts',
+  'git.conflictsPending': ({ count }: Params) =>
+    `There are ${String(count)} conflicted files: resolve with AI, hand off to a session, or fix them manually and stage`,
+  'git.operationResolved': ({ operation }: Params) =>
+    `Conflicts resolved — run git ${operation} --continue in your terminal`,
+  'git.conflictsResolvedHint': 'Conflicts resolved — commit to finish.',
+  'git.resolveWithAi': 'Resolve with AI',
+  'git.openInSession': 'Resolve in a session',
+  'git.conflictSessionTitle': 'Resolve Git conflicts',
+  'git.conflictSessionPrompt': ({ operation, branch, count, files }: Params) => {
+    const op = String(operation)
+    const head =
+      op === 'merge'
+        ? 'This repository has an unfinished merge'
+        : op === 'rebase'
+          ? 'This repository has an unfinished rebase'
+          : op === 'cherry-pick'
+            ? 'This repository has an unfinished cherry-pick'
+            : 'This repository has an unfinished git operation'
+    const source =
+      op !== 'merge'
+        ? ''
+        : String(branch) === ''
+          ? ' (source branch unknown)'
+          : ` (source branch: ${String(branch)})`
+    const finish =
+      op === 'rebase'
+        ? '3. Once everything is resolved, run git rebase --continue; if the next commit conflicts, follow the same process.'
+        : op === 'cherry-pick'
+          ? '3. Once everything is resolved, run git cherry-pick --continue.'
+          : '3. Once everything is resolved, complete the merge commit (the default merge message is fine).'
+    return (
+      `${head}${source} with ${String(count)} conflicted files:\n\n${String(files)}\n\n` +
+      'Please resolve this conflict, step by step:\n' +
+      '1. First read every conflicted file in full (even large ones), list the conflict points and how you plan to resolve them, and **send that to me for confirmation — do not modify any file before I confirm**.\n' +
+      '2. After I confirm: keep the correct changes from both sides, remove all conflict markers (<<<<<<<, =======, |||||||, >>>>>>>), and stage the files with git add.\n' +
+      `${finish} If a file is binary or requires choosing one side, ask me which side to keep first.\n` +
+      '4. Do not touch files unrelated to the conflict.'
+    )
+  },
+  'git.resolving': 'AI is resolving conflicts…',
+  'git.resolvePartial':
+    'Some conflicts could not be resolved automatically — fix them manually.',
+  'git.abortMerge': 'Abort merge',
+  'git.abortMergeTitle': 'Abort the merge?',
+  'git.abortMergeBody': 'This discards everything from this merge, including already-resolved conflicts.',
+  'git.resolveFailed.binary': 'Binary file — resolve it manually',
+  'git.resolveFailed.tooLarge': 'File too large to send to AI — resolve it manually',
+  'git.resolveFailed.deleted': 'Deleted on both sides — decide manually whether to keep or delete',
+  'git.resolveFailed.unresolved': 'AI could not produce a usable result — resolve it manually',
+  'git.resolveFailed.aiFailed': 'AI request failed — retry or resolve manually',
+  'git.resolveFailed.limit':
+    'Only part of the conflicts were processed — run again or fix the rest manually',
+  'git.resolveFailed.changed':
+    'The file changed while AI was resolving (or the merge was aborted) — left untouched, check it manually',
+  'git.resolveFailed.symlink': 'Symlink — not rewritten automatically, resolve it manually',
+  'git.resolveFailed.stageFailed': 'Resolved but staging failed — stage it manually',
+  'git.mergeFailed': 'Merge failed',
+  'git.abortMergeFailed': 'Failed to abort the merge',
+  'git.mergeInProgress': 'A git operation is already in progress — finish or abort it first'
 }

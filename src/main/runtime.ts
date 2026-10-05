@@ -107,6 +107,7 @@ import type { UnpricedUsageAttempt } from '../shared/domain/usage'
 import { SessionTitleGenerator } from './session-title'
 import { AgentDraftGenerator } from './agent-draft'
 import { CommitMessageGenerator } from './commit-message'
+import { ConflictResolver } from './conflict-resolve'
 import type { SessionChange } from '../shared/domain/session'
 import type { CanonicalRequest } from './kernel/upstream/canonical'
 import { ulid } from '../shared/util/id'
@@ -136,6 +137,7 @@ let seeded = false
 let sessionTitles: SessionTitleGenerator | null = null
 let agentDrafts: AgentDraftGenerator | null = null
 let commitMessages: CommitMessageGenerator | null = null
+let conflictResolver: ConflictResolver | null = null
 let environments: EnvironmentManager | null = null
 let environmentStatusSink: ((status: ConnectionStatus) => void) | undefined
 let environmentAuthentication: ((profile: SshConnectionProfile, senderId: number) => Promise<{ env: NodeJS.ProcessEnv; close(): Promise<void>; resolve?(values: Map<string, string>): void; ask?(prompt: string, rejected: boolean): Promise<string> }>) | undefined
@@ -280,6 +282,7 @@ export function installHost(h: KernelHost): void {
   // 辅助请求那几个路由器同样抓着旧 host(`shutdownSessionTitles` 已经处理了标题那一个)
   agentDrafts = null
   commitMessages = null
+  conflictResolver = null
 }
 
 export function getHost(): KernelHost {
@@ -740,6 +743,29 @@ export function getCommitMessageGenerator(): CommitMessageGenerator {
 }
 
 /**
+ * 「AI 解决冲突」用的那一次辅助请求。
+ *
+ * ★ 和上面三个逐条同形。**又一个独立的 `UpstreamRouter`** 的理由同
+ *   `getCommitMessageGenerator`:合并冲突时用户点一次「AI 解决」就发好几次请求
+ *   (每个文件一次),失败率天然高,这些失败不该把某家供应商在正文侧标记成不健康。
+ */
+export function getConflictResolver(): ConflictResolver {
+  if (conflictResolver !== null) return conflictResolver
+  const resolver = new ConflictResolver({
+    upstream: new UpstreamRouter(getHost(), providerConfig, {
+      idleTimeoutMs: upstreamIdleTimeoutMs,
+      onUsageAttempt: (record) => {
+        if (conflictResolver === resolver) persistUsageAttempt(record)
+      },
+      priceAttempt: priceAttemptForRouter
+    }),
+    logger: getHost().logger
+  })
+  conflictResolver = resolver
+  return resolver
+}
+
+/**
  * Freeze pricing at the attempt boundary. Later seed updates must never change
  * historical spend, and an unavailable rate remains NULL rather than silently
  * turning into a plausible-looking zero.
@@ -1078,6 +1104,7 @@ export async function refreshRuntimeForConfigScope(): Promise<void> {
   router = null
   agentDrafts = null
   commitMessages = null
+  conflictResolver = null
 
   /*
     ★ 三张注册表**主动整体丢掉**,不是留着等下一次 run 覆盖:
@@ -3175,6 +3202,7 @@ export function resetRuntimeForTest(): void {
   router = null
   agentDrafts = null
   commitMessages = null
+  conflictResolver = null
   tools = null
   preparePluginTools = async () => {}
   // ★ 和上一行同理:现报函数是模块级的,留着的话上一个用例的插件工具会

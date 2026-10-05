@@ -19,19 +19,35 @@
  *   (`switch <branch>`)用 `safeRef()` 挡掉前导 `-`。
  */
 import { execFile } from 'node:child_process'
-import { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  writeFileSync
+} from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   GitBranchSummary,
   GitCommitSummary,
+  GitConflictFailure,
+  GitConflictResolution,
   GitDiff,
+  GitMergeResult,
+  GitOperation,
   GitOverview,
   GitUnavailableReason
 } from '../../shared/domain/git'
 import { isLocalEnvironment } from '../../shared/domain/environment'
 import { MAX_FILES, parseStatus } from './git-status'
+import { parseMergeSource } from './git-operation'
 import { COMMIT_MESSAGE_DIFF_LIMIT } from '../commit-message'
-import { getCommitMessageGenerator } from '../runtime'
+import { getCommitMessageGenerator, getConflictResolver } from '../runtime'
+import type { ConflictResolver } from '../conflict-resolve'
 import { store } from '../state/store'
 import { IpcError } from './errors'
 
@@ -46,6 +62,11 @@ const NETWORK_TIMEOUT_MS = 120_000
 const MAX_DIFF_CHARS = 200 * 1024
 /** 子进程输出缓冲。status 撑满 MAX_FILES 时也够。 */
 const MAX_BUFFER = 16 * 1024 * 1024
+
+/** 一次「AI 解决冲突」最多处理的文件数。超出的记 `limit`,不静默跳过。 */
+const MAX_RESOLVE_FILES = 20
+/** 单个冲突文件的上限。再大就不适合整份塞给模型,记 `tooLarge`。 */
+const MAX_CONFLICT_FILE_BYTES = 128 * 1024
 
 /**
  * ★ `--no-optional-locks`:别和用户开着的 IDE / GUI 抢 index 锁(同 `git-context.ts`)。
@@ -218,6 +239,53 @@ function safeRef(name: unknown): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 未完成操作探测 —— 合并 / rebase / cherry-pick 共用一套
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 仓库当前卡在哪种未完成操作里。
+ *
+ * ★ `rev-parse -q --verify <HEAD 哨兵>`:文件存在时打印它的值,不存在时安静地
+ *   退出非零(`-q` 压掉 fatal),不必读 stderr 分辨「没有」和「坏了」。
+ *
+ * ★ `REBASE_HEAD` 在 rebase 的某些阶段(两次 pick 之间)并不存在,所以还要看
+ *   `rebase-merge` / `rebase-apply` 目录 —— 前者是 merge 后端,后者是老 apply 后端。
+ *   用 `--git-path` 取路径而**不是手工拼 `.git/rebase-merge`**:在 worktree /
+ *   submodule / `GIT_DIR` 被重定向的仓库里,`.git` 可能是个文件或指向别处,手工拼
+ *   的路径会永远判不到。
+ *
+ * ★ `--git-path` 的输出是**相对当前目录**(也就是 `repo.dir`)的,`existsSync`
+ *   必须先把它与 `repo.dir` 拼起来 —— 否则会被解析到 Electron 进程的 cwd 上。
+ */
+async function currentOperation(repo: Repo): Promise<GitOperation> {
+  if ((await run(repo.dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])).code === 0) return 'merge'
+  if ((await run(repo.dir, ['rev-parse', '-q', '--verify', 'CHERRY_PICK_HEAD'])).code === 0) {
+    return 'cherry-pick'
+  }
+  if ((await run(repo.dir, ['rev-parse', '-q', '--verify', 'REBASE_HEAD'])).code === 0) return 'rebase'
+  for (const name of ['rebase-merge', 'rebase-apply']) {
+    const gitPath = await run(repo.dir, ['rev-parse', '--git-path', name])
+    const path = gitPath.stdout.trim()
+    // 空输出时 resolve(repo.dir, '') 会退回仓库目录本身,那会误判成 rebase —— 挡掉
+    if (gitPath.code === 0 && path !== '' && existsSync(resolve(repo.dir, path))) return 'rebase'
+  }
+  return ''
+}
+
+/** 合并来源分支。读不到 / 解析不出 → 空串,不报错。 */
+async function mergeSourceOf(repo: Repo): Promise<string> {
+  try {
+    const gitPath = await run(repo.dir, ['rev-parse', '--git-path', 'MERGE_MSG'])
+    const path = gitPath.stdout.trim()
+    if (gitPath.code !== 0 || path === '') return ''
+    // 同 `currentOperation`:`--git-path` 给的是相对 repo.dir 的路径
+    return parseMergeSource(readFileSync(resolve(repo.dir, path), 'utf8'))
+  } catch {
+    return ''
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 频道实现
 // ═══════════════════════════════════════════════════════════════
 
@@ -229,7 +297,10 @@ export async function getGitOverview(req: { workspaceId: string }): Promise<GitO
   if (status.missing) return unavailable('git-missing')
   if (status.code !== 0) fail(status, 'git status 失败')
 
-  return { available: true, root: repo.root, ...parseStatus(status.stdout) }
+  const operation = await currentOperation(repo)
+  const mergeSource = operation === 'merge' ? await mergeSourceOf(repo) : ''
+
+  return { available: true, root: repo.root, ...parseStatus(status.stdout), operation, mergeSource }
 }
 
 export async function listGitBranches(req: { workspaceId: string }): Promise<GitBranchSummary[]> {
@@ -325,6 +396,12 @@ function clampDiff(path: string, staged: boolean, text: string): GitDiff {
  *   没有可靠的 null 设备写法(`NUL` 不是 git 认得的路径),而未跟踪文件恰恰是
  *   新建项目里最常点开的那一类。拼出来的是标准 unified diff,和 git 的输出同形,
  *   界面那边不需要第二套渲染。
+ *
+ * ★ 现在服务**两种**文件:未跟踪的,以及**未合并的**(见 `getGitDiff` 的特判)。
+ *   未合并文件的工作区副本带着 `<<<<<<<` / `=======` / `>>>>>>>` 标记,按「整份
+ *   新增」渲染成统一 diff,和未跟踪文件同一条路径 —— 因为 `git diff` 对未合并
+ *   文件给的是 `diff --cc` 三方格式,渲染层只认 `@@`,点开是一片乱码。
+ *   (DD 这种双方都删的文件不存在,给空 diff。)
  */
 function readUntracked(repo: Repo, path: string): GitDiff {
   const empty: GitDiff = { path, staged: false, binary: false, truncated: false, text: '' }
@@ -382,6 +459,15 @@ export async function getGitDiff(req: {
   const staged = req.staged === true
 
   if (!staged) {
+    /*
+      ★ 未合并的文件**必须**绕开 `git diff`:对冲突文件它给的是 `diff --cc` +
+      `@@@` 三方格式,而渲染层的解析器只认 `@@`,点开是一片乱码(已实测)。
+      工作区那一份带着冲突标记,按「整份新增」渲染反而能看清冲突本身。
+      文件不存在(DD,双方都删)时 `readUntracked` 给空 diff,不报错。
+    */
+    const unmerged = await run(repo.root, ['ls-files', '-u', '--', path])
+    if (unmerged.code === 0 && unmerged.stdout.trim() !== '') return readUntracked(repo, path)
+
     /*
       ★ 先问 git「这个文件跟踪了吗」。未跟踪文件的 `git diff` 输出是**空的**
       (它不在 index 里,没有可比的一侧)—— 直接跑的话用户点开一个新文件
@@ -568,4 +654,207 @@ export async function generateGitCommitMessage(req: {
     const key = error instanceof Error ? error.message : ''
     throw new IpcError('tool_failed', key.startsWith('git.') ? key : 'git.aiFailed')
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 分支合并 + AI 解决冲突
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 当前未解决的冲突文件(仓库根相对,NUL 分隔)。命令失败返回空数组 ——
+ * 调用方据此判断「没有冲突」,不需要区分「命令坏了」。
+ */
+async function conflictedPaths(repo: Repo): Promise<string[]> {
+  const result = await run(repo.root, ['diff', '--name-only', '-z', '--diff-filter=U'])
+  if (result.code !== 0) return []
+  return result.stdout.split('\u0000').filter((path) => path !== '')
+}
+
+/**
+ * 把某个分支合并进当前分支。
+ *
+ * ★ **冲突不是错误**:合并已经开始,仓库停在一个有冲突的状态等用户处理。这里
+ *   返回 `{ status: 'conflicted', paths }` 让界面显示冲突清单,而不是抛一个
+ *   红色错误 —— 抛了的话用户既不知道冲突在哪些文件,也不知道合并已经发生。
+ *
+ * ★ **`--no-edit`**:没有终端面板,`git merge` 遇到需要编辑合并信息时会去开
+ *   编辑器然后永远挂住。`--no-edit` 让它直接用默认信息提交,不再等输入。
+ *
+ * ★ 入口先挡一次「已经有未完成操作」:界面上按钮应该禁用,但 handler 不能只靠
+ *   界面 —— 一次已经卡住的合并里再叠第二次会覆盖 `MERGE_HEAD`,用户之前的解决
+ *   进度就没了。**rebase / cherry-pick 途中叠一次 merge 同样会毁掉现场**,所以
+ *   守卫泛化到任意未完成操作,而不是只看 `MERGE_HEAD`。
+ *
+ * ★ 哨兵探测之外还要看**未合并文件**:`git merge --squash` / `git revert` 冲突时
+ *   不写 MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD(REVERT_HEAD 我们的探测也不认),
+ *   `currentOperation` 会返回 `''`。这时若放行,`git merge` 以 128 退出、而
+ *   `conflictedPaths` 恰好非空(上一轮遗留),面板就会谎报「合并产生 N 个冲突」——
+ *   可这次合并根本没开始。所以再挡一层。
+ */
+export async function mergeGit(req: {
+  workspaceId: string
+  branch: string
+}): Promise<GitMergeResult> {
+  const repo = await requireRepo(req.workspaceId)
+
+  const operation = await currentOperation(repo)
+  if (operation !== '') throw new IpcError('tool_failed', 'git.mergeInProgress')
+
+  const pending = await conflictedPaths(repo)
+  if (pending.length > 0) throw new IpcError('tool_failed', 'git.mergeInProgress')
+
+  // 合并前的 HEAD。用来在成功后判断这次合并到底有没有产生提交,见下。
+  const before = await run(repo.dir, ['rev-parse', 'HEAD'])
+
+  const result = await run(repo.dir, ['merge', '--no-edit', safeRef(req.branch)], WRITE_TIMEOUT_MS)
+  /*
+    ★ 判断「已经是当前分支的最新状态」**不解析 stdout 文案**:启用 NLS 的 git 会把
+    "Already up to date." 翻译成别的语言,`/already up to date/i` 直接漏判,于是
+    一次什么都没发生的合并被谎报成 `merged`(「已合并」)。
+    ★ 改为比 HEAD:合并前后 HEAD 相同 = 没产生任何提交、也没快进,即 up-to-date。
+    before 无 HEAD(空仓库 unborn)时视为 merged —— 合并确实把第一个提交造出来了。
+  */
+  if (result.code === 0) {
+    const after = await run(repo.dir, ['rev-parse', 'HEAD'])
+    const unchanged =
+      before.code === 0 && after.code === 0 && before.stdout.trim() === after.stdout.trim()
+    return unchanged ? { status: 'upToDate' } : { status: 'merged' }
+  }
+
+  // 非零退出:是冲突还是真的失败,看有没有未解决的文件
+  const paths = await conflictedPaths(repo)
+  if (paths.length > 0) return { status: 'conflicted', paths }
+  fail(result, 'git.mergeFailed')
+}
+
+/** 中止一次进行中的合并,回到合并前的状态。 */
+export async function abortGitMerge(req: { workspaceId: string }): Promise<void> {
+  const repo = await requireRepo(req.workspaceId)
+  const result = await run(repo.dir, ['merge', '--abort'], WRITE_TIMEOUT_MS)
+  if (result.code !== 0) fail(result, 'git.abortMergeFailed')
+}
+
+/** 把 resolver 抛的 i18n 键映射成界面文案用的失败原因。 */
+function conflictFailure(error: unknown): GitConflictFailure {
+  const key = error instanceof Error ? error.message : ''
+  if (key === 'git.aiTruncated' || key === 'git.aiUnparsable') return 'unresolved'
+  // git.aiTimeout / git.aiFailed / git.aiNoModel / 其他意外
+  return 'aiFailed'
+}
+
+/**
+ * 逐个解决冲突文件并暂存。
+ *
+ * ★ **顺序处理,不并发**:每个文件一次完整的模型请求,并发的账单和内存都不划算,
+ *   而冲突文件通常就几个。逐文件失败**不抛**,继续下一个 —— 一次调用能解决多少
+ *   是多少,返回数组让界面逐行显示。
+ *
+ * ★ **写盘只在验证通过之后**:`resolver.resolve` 内部过 `cleanResolvedContent`
+ *   闸门,返回的就是可以直接落盘的内容。写失败或暂存失败记 `unresolved`,
+ *   不会留下半写状态。
+ */
+export async function resolveGitConflicts(req: {
+  workspaceId: string
+}): Promise<GitConflictResolution[]> {
+  const repo = await requireRepo(req.workspaceId)
+  const paths = await conflictedPaths(repo)
+  if (paths.length === 0) return []
+
+  // 模型取设置里的默认模型,面板上不给选择器 —— 同 `generateGitCommitMessage`
+  const settings = store.getSettings()
+  if (settings.defaultModel === '') throw new IpcError('tool_failed', 'git.aiNoModel')
+
+  const resolver = getConflictResolver()
+  const results: GitConflictResolution[] = []
+  for (const raw of paths) {
+    const path = safePath(raw)
+    if (results.length >= MAX_RESOLVE_FILES) {
+      results.push({ path, status: 'failed', reason: 'limit' })
+      continue
+    }
+    results.push(await resolveOne(repo, resolver, path, settings, req.workspaceId))
+  }
+  return results
+}
+
+async function resolveOne(
+  repo: Repo,
+  resolver: ConflictResolver,
+  path: string,
+  settings: ReturnType<typeof store.getSettings>,
+  workspaceId: string
+): Promise<GitConflictResolution> {
+  // 这是唯一一处真的去拼 fs 路径的地方 —— 越界一律拒(照 `readUntracked`)
+  const target = resolve(repo.root, path)
+  const rel = relative(repo.root, target)
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    return { path, status: 'failed', reason: 'unresolved' }
+  }
+
+  let content: string
+  let original: Buffer
+  try {
+    /*
+      ★ 用 `lstatSync` 而不是 `statSync`:后者会跟随符号链接,于是「文件是不是
+      符号链接」这个问题永远答不上来。写操作**必须**拒符号链接 —— 写路径会跟着
+      链接把内容写到仓库外(甚至写到 `/etc/...`),只读的 `readUntracked` 跟随一下
+      无伤,写不行。
+    */
+    const stat = lstatSync(target)
+    if (stat.isSymbolicLink()) return { path, status: 'failed', reason: 'symlink' }
+    if (!stat.isFile()) return { path, status: 'failed', reason: 'deleted' }
+    if (stat.size > MAX_CONFLICT_FILE_BYTES) return { path, status: 'failed', reason: 'tooLarge' }
+    original = readFileSync(target)
+    // NUL 字节 = 二进制。和 git 自己的判据一致(同 `readUntracked`)
+    if (original.includes(0)) return { path, status: 'failed', reason: 'binary' }
+    content = original.toString('utf8')
+  } catch {
+    // 列出来之后文件又没了 —— 当删除处理,别报错
+    return { path, status: 'failed', reason: 'deleted' }
+  }
+
+  let resolved: string
+  try {
+    resolved = await resolver.resolve({
+      path,
+      content,
+      model: settings.defaultModel,
+      ...(settings.defaultModelProviderId === undefined
+        ? {}
+        : { modelProviderId: settings.defaultModelProviderId }),
+      workspaceId
+    })
+  } catch (error) {
+    return { path, status: 'failed', reason: conflictFailure(error) }
+  }
+
+  /*
+    ★★ 写盘前复核:一次 `resolveConflicts` 顺序跑最多 20 个文件,期间用户在编辑器里
+    完全可能改过这个文件、手动 `git add` 了、或者干脆 `git merge --abort` 了。
+    直接写回去会覆盖用户的手动操作。两件事各查一遍:
+      1. 这个路径还在未合并集合里吗(已被解决 / 已中止就跳过);
+      2. 文件字节和送模型时一模一样吗(用户改过就跳过)。
+    ★ 用原始 Buffer 做 `equals`,不是两边 `toString` 再比字符串 —— 编码往返比较会把
+      不同的字节序列(非法 UTF-8、BOM)当成相等,而那正是「绝不能覆盖」的边界。
+  */
+  const stillConflicted = (await conflictedPaths(repo)).includes(path)
+  if (!stillConflicted) return { path, status: 'failed', reason: 'changed' }
+  let current: Buffer
+  try {
+    current = readFileSync(target)
+  } catch {
+    return { path, status: 'failed', reason: 'changed' }
+  }
+  if (!current.equals(original)) return { path, status: 'failed', reason: 'changed' }
+
+  // 验证和复核都通过,才允许落盘
+  try {
+    writeFileSync(target, resolved, 'utf8')
+  } catch {
+    return { path, status: 'failed', reason: 'unresolved' }
+  }
+  const staged = await run(repo.root, ['add', '--', path], WRITE_TIMEOUT_MS)
+  // 内容已经写回去了,只是没暂存成功 —— 不能说 unresolved,那会让用户以为 AI 没产出
+  if (staged.code !== 0) return { path, status: 'failed', reason: 'stageFailed' }
+  return { path, status: 'resolved' }
 }

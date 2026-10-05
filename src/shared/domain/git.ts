@@ -68,7 +68,14 @@ export interface GitRepoState {
   files: GitFileChange[]
   /** 改动文件太多,列表被截断了(见主进程的 `MAX_FILES`) */
   filesTruncated: boolean
+  /** 仓库当前卡住的未完成操作。'' = 没有。 */
+  operation: GitOperation
+  /** merge 的来源分支(.git/MERGE_MSG 首行解析)。仅 operation === 'merge' 时可能有值,其余/解析失败为 ''。 */
+  mergeSource: string
 }
+
+/** 仓库当前卡住的未完成操作。'' = 没有。 */
+export type GitOperation = '' | 'merge' | 'rebase' | 'cherry-pick'
 
 export type GitOverview =
   | ({ available: true } & GitRepoState)
@@ -82,4 +89,32 @@ export interface GitDiff {
   /** 超过上限被截断 */
   truncated: boolean
   text: string
+}
+
+/** 一次合并的结果。冲突不是错误:合并已经开始,等用户解决冲突或中止。 */
+export type GitMergeResult =
+  | { status: 'merged' }
+  | { status: 'upToDate' }
+  | { status: 'conflicted'; paths: string[] }
+
+/** AI 解决单个冲突文件失败的原因。渲染层按 `git.resolveFailed.<reason>` 取文案。 */
+export type GitConflictFailure =
+  | 'binary'
+  | 'tooLarge'
+  | 'deleted'
+  | 'unresolved'
+  | 'aiFailed'
+  | 'limit'
+  /** 送模型之后文件被用户手动改动 / 已不在未合并集合,拒绝覆盖 */
+  | 'changed'
+  /** 符号链接 —— 写路径会跟随链接写出仓库外,写操作必须拒 */
+  | 'symlink'
+  /** 内容已写回,但 `git add` 失败 */
+  | 'stageFailed'
+
+export interface GitConflictResolution {
+  path: string
+  status: 'resolved' | 'failed'
+  /** 仅 status === 'failed' 时存在 */
+  reason?: GitConflictFailure
 }

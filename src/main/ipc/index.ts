@@ -181,6 +181,7 @@ import {
 import { browserManager, setBrowserChangeListener } from '../browser/manager'
 import { clearBrowserProfileState, exportBrowserCookies, importBrowserCookies } from '../browser/session'
 import {
+  abortGitMerge,
   checkoutGitBranch,
   commitGit,
   createGitBranch,
@@ -189,8 +190,10 @@ import {
   getGitOverview,
   listGitBranches,
   listGitCommits,
+  mergeGit,
   pullGit,
   pushGit,
+  resolveGitConflicts,
   stageGitPaths,
   unstageGitPaths
 } from './git'
@@ -446,6 +449,9 @@ const handlers: HandlerMap = {
   'git:pull': (req) => pullGit(req),
   'git:push': (req) => pushGit(req),
   'git:generateCommitMessage': (req) => generateGitCommitMessage(req),
+  'git:merge': (req) => mergeGit(req),
+  'git:abortMerge': (req) => abortGitMerge(req),
+  'git:resolveConflicts': (req) => resolveGitConflicts(req),
   'scheduled:listTasks': ({ workspaceId }) => store.listScheduledTasks(workspaceId),
   'scheduled:getTask': ({ id }) => store.getScheduledTask(id) ?? null,
   // 写入的三件套(落库 → 重排 → 广播)收口在 `scheduled/bridge.ts`,与 Agent 工具共用同一份

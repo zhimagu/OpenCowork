@@ -85,7 +85,21 @@ export interface MergeModelCatalogOptions {
   bindings?: readonly ModelAlias[]
 }
 
-/** Prefer exact ids/aliases, then an unambiguous, longest gateway-prefixed match. */
+/**
+ * Prefer exact ids/aliases, then an unambiguous, longest gateway-prefixed match.
+ *
+ * A gateway may namespace its upstream ids two ways, and both mean "the tail is
+ * the catalogue id":
+ *
+ * - aggregator prefix `vendor/model` (`z-ai/GLM-5.3-Flash`)
+ * - namespace prefix `region:model` (`cn:hy3`, `global:deepseek-v4.1-flash`)
+ *
+ * This mirrors `findBuiltinModel`. It is a tail-equivalence check, not a
+ * normalisation: we only match when the wanted id ends in `:` + a known
+ * id/alias. 这就是为什么 Ollama 的 tag(`gpt-oss:120b`)不受影响 —— 它走精确
+ * 匹配命中自己的条目;此处仅在某条目的 id/别名恰好等于尾部时才等价,不会
+ * 把任意冒号做全局折叠。
+ */
 export function findCatalogModel<T extends ModelCatalogDefinition>(definitions: readonly T[], modelId: string): T | undefined {
   const wanted = normalizeModelId(modelId)
   const exact = definitions.find((row) => normalizeModelId(row.id) === wanted)
@@ -94,7 +108,8 @@ export function findCatalogModel<T extends ModelCatalogDefinition>(definitions: 
   if (aliases.length === 1) return aliases[0]
   if (aliases.length > 1) return undefined
   const matches = definitions.map((row) => ({ row, length: Math.max(0,
-    ...[row.id, ...(row.aliases ?? [])].map((id) => wanted.endsWith(`/${normalizeModelId(id)}`) ? id.trim().length : 0)
+    ...[row.id, ...(row.aliases ?? [])].map((id) =>
+      (wanted.endsWith(`/${normalizeModelId(id)}`) || wanted.endsWith(`:${normalizeModelId(id)}`)) ? id.trim().length : 0)
   ) })).filter((match) => match.length > 0).sort((a, b) => b.length - a.length)
   return matches[0]?.length === matches[1]?.length ? undefined : matches[0]?.row
 }

@@ -822,6 +822,8 @@ const ZH: Messages = {
   "models.budget": "Token Budget",
   "models.reasoningHint":
     "GLM、DeepSeek、Anthropic 等供应商会按适配器转换为各自请求字段。",
+  "models.recommendationMatch": "目录匹配：{name}",
+  "models.applyRecommendation": "应用建议",
   "models.requestAdapter": "请求体适配",
   "models.protocolSettings": "模型协议",
   "models.protocolBinding": "配置绑定",
@@ -2809,6 +2811,8 @@ const EN: Messages = {
   "models.budget": "Token budget",
   "models.reasoningHint":
     "GLM, DeepSeek, Anthropic, and other providers are translated to their request fields by adapters.",
+  "models.recommendationMatch": "Catalog match: {name}",
+  "models.applyRecommendation": "Apply recommendations",
   "models.requestAdapter": "Request adapter",
   "models.protocolSettings": "Model protocol",
   "models.protocolBinding": "Binding",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelAlias } from '../provider'
 import { catalogDefinitionFromAlias, isModelCatalogDefinition, mergeModelCatalog, type ModelCatalogDefinition } from '../model-catalog'
-import { BUILTIN_MODEL_CATALOG, findBuiltinModel, manufacturerForModelId, MODEL_MANUFACTURERS } from '../model-catalog-inventory'
+import { BUILTIN_MODEL_CATALOG, findBuiltinModel, isImageModelId, manufacturerForModelId, MODEL_MANUFACTURERS } from '../model-catalog-inventory'
 
 const definition = (id: string, manufacturerId = 'openai'): ModelCatalogDefinition => ({
   id,
@@ -1309,6 +1309,16 @@ describe('vendor-first model catalogue', () => {
     expect(rows[0]?.providerIds).toEqual(['minimax'])
   })
 
+  it('★ 把 region:model 命名空间绑定归位到目录行', () => {
+    const rows = mergeModelCatalog({
+      builtin: [definition('hy3', 'hunyuan')],
+      bindings: [binding('relay', 'cn:hy3')],
+    })
+
+    expect(rows[0]?.configured).toBe(true)
+    expect(rows[0]?.providerIds).toEqual(['relay'])
+  })
+
   it('converts an alias to a custom row only on explicit user action', () => {
     const row = catalogDefinitionFromAlias(binding('ollama', 'muse-spark-1.3'), {
       manufacturerId: 'meta',
@@ -1373,5 +1383,34 @@ describe('Ollama 目录条目 · Think 的启用方式', () => {
      * 托管方)。权威的家族归属是目录条目自己的 manufacturerId(上面第一条已断言)。
      */
     expect(manufacturerForModelId('gpt-oss:120b').id).toBe('openai')
+  })
+})
+
+/* ================================================================
+ * 命名空间前缀 —— 网关模型 ID 形如 `cn:deepseek-v4.1-flash` /
+ * `global:deepseek-v4.1-flash` / `cn:hy3`。目录匹配要同时认聚合站的
+ * `vendor/` 与网关的 `region:`,否则这些 ID 落空后元数据静默丢失。
+ * ================================================================ */
+describe('命名空间前缀 · findBuiltinModel', () => {
+  it('`region:model` 前缀命中,别名与大小写一并覆盖', () => {
+    const preview = 'deepseek-v4.1-flash-expires-on-0910'
+    expect(findBuiltinModel('cn:deepseek-v4.1-flash')?.id).toBe(preview)
+    expect(findBuiltinModel('global:deepseek-v4.1-flash')?.id).toBe(preview)
+    expect(findBuiltinModel('CN:DeepSeek-V4.1-Flash')?.id).toBe(preview)
+    expect(findBuiltinModel('cn:hy3')?.id).toBe('hy3')
+    expect(findBuiltinModel('cn:hy3-preview')?.id).toBe('hy3')
+  })
+
+  it('未命中返回 undefined', () => {
+    expect(findBuiltinModel('cn:not-a-model')).toBeUndefined()
+  })
+
+  it('冒号是命名空间前缀,不破坏精确匹配的 `:tag` 形态', () => {
+    expect(findBuiltinModel('gpt-oss:120b')?.manufacturerId).toBe('ollama')
+    expect(findBuiltinModel('gpt-oss:20b')?.manufacturerId).toBe('ollama')
+  })
+
+  it('`region:model` 前缀同样驱动图片模态判断', () => {
+    expect(isImageModelId('cn:hunyuan-muse')).toBe(true)
   })
 })

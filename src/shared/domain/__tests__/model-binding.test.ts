@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { modelBindingResolver } from '../model-binding'
 import { findCatalogModel, type ModelCatalogDefinition } from '../model-catalog'
-import { findBuiltinModel, OLLAMA_STANDARD_THINKING } from '../model-catalog-inventory'
+import { BUILTIN_MODEL_CATALOG, findBuiltinModel, OLLAMA_STANDARD_THINKING } from '../model-catalog-inventory'
 import { effectiveModelProtocol, IMPORTED_ALIAS_DEFAULTS, type ModelAlias } from '../provider'
 
 const imported = (overrides: Partial<ModelAlias> = {}): ModelAlias => ({
@@ -142,6 +142,51 @@ describe('catalogue-backed provider metadata', () => {
     expect(findCatalogModel(definitions, 'vendor/model')?.displayName).toBe('Vendor')
     expect(findCatalogModel(definitions, 'gateway/vendor/model')?.displayName).toBe('Vendor')
     expect(findCatalogModel(definitions.map((d) => ({ ...d, aliases: ['ambiguous'] })), 'ambiguous')).toBeUndefined()
+  })
+
+  /*
+   * ★★ 用户的网关模型 ID 形如 `cn:hy3` / `global:deepseek-v4.1-flash`。
+   * 别名/运行时绑定走的是 findCatalogModel(不是 findBuiltinModel),上一轮只给
+   * 后者加了冒号后缀匹配,于是这些别名永远落空、吃导入默认值(200K 窗口、
+   * 推理默认关闭)。这里钉住 `region:model` 命名空间前缀,语义与 findBuiltinModel 一致。
+   */
+  it('★ 支持 region:model 命名空间前缀(冒号),大小写不敏感', () => {
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'cn:hy3')?.id).toBe('hy3')
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'global:deepseek-v4.1-flash')?.id)
+      .toBe('deepseek-v4.1-flash-expires-on-0910')
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'CN:DeepSeek-V4.1-Flash')?.id)
+      .toBe('deepseek-v4.1-flash-expires-on-0910')
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'cn:not-a-model')).toBeUndefined()
+  })
+
+  it('★ Ollama tag 与 / 前缀回归:冒号折叠不误伤 gpt-oss:120b', () => {
+    // 冒号形态各归各家:ollama 的 tag 走精确匹配,openai 的连字符形态不被顶掉
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'gpt-oss:120b')?.manufacturerId).toBe('ollama')
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'gpt-oss:20b')?.manufacturerId).toBe('ollama')
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'gpt-oss-120b')?.manufacturerId).toBe('openai')
+    // `/` 前缀行为不变
+    expect(findCatalogModel(BUILTIN_MODEL_CATALOG, 'anthropic/claude-sonnet-4-6')?.manufacturerId)
+      .toBe('anthropic')
+  })
+
+  /*
+   * ★★★ 别名/运行时绑定路径端到端:`cn:hy3` 这种「导入默认值形态」的记录
+   * (catalogOverrides: []，即用户没冻结任何字段)现在必须采纳目录元数据。
+   * 修复前它匹配不上 hy3，永远停在 IMPORTED_ALIAS_DEFAULTS ——
+   * 症状是聊天里推理默认关闭、窗口 200K。
+   */
+  it('★★★ 导入默认值形态的 cn:hy3 别名采纳 hy3 目录元数据', () => {
+    const model = modelBindingResolver().resolve(imported({ upstreamModel: 'cn:hy3', catalogOverrides: [] }))
+    expect(model.thinkingConfig).toEqual({
+      mode: 'effort',
+      defaultEnabled: true,
+      defaultEffort: 'high',
+      parameterPath: 'reasoning_effort',
+    })
+    expect(model.reasoningEfforts).toEqual(['none', 'low', 'high'])
+    expect(model.contextWindow).toBe(262_144)
+    expect(model.maxOutputTokens).toBe(131_072)
+    expect(model.capabilities.thinking).toBe(true)
   })
 })
 

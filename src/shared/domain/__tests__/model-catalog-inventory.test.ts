@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { defaultProtocolForModel } from '../model-catalog-inventory'
+import { defaultProtocolForModel, findBuiltinModel, recommendCatalogMetadata } from '../model-catalog-inventory'
 
 /*
  * 「厂商默认协议」这张表钉的是规则本身,不是某一行的取值 ——
@@ -23,5 +23,46 @@ describe('厂商默认协议', () => {
     expect(defaultProtocolForModel('glm-5.3')).toBeUndefined()
     expect(defaultProtocolForModel('deepseek-v4-pro')).toBeUndefined()
     expect(defaultProtocolForModel('totally-unknown-model')).toBeUndefined()
+  })
+})
+
+/*
+ * 「添加自定义模型」表单反查预填 —— recommendCatalogMetadata 把目录行里
+ * 可安全继承的元数据挑出来,同时**不**泄漏身份/证据字段(id、aliases、
+ * source、requestAdapter)。命名空间前缀已由 findBuiltinModel 覆盖。
+ */
+describe('目录元数据推荐 · recommendCatalogMetadata', () => {
+  it('命中时窗口/输出上限与目录一致', () => {
+    const recommended = recommendCatalogMetadata('deepseek-v4-flash')
+    const known = findBuiltinModel('deepseek-v4-flash')
+    expect(recommended).toBeDefined()
+    expect(recommended?.contextWindow).toBe(known?.contextWindow)
+    expect(recommended?.maxOutputTokens).toBe(known?.maxOutputTokens)
+  })
+
+  it('命名空间前缀命中,带回思考线形', () => {
+    expect(recommendCatalogMetadata('cn:hy3')).toMatchObject({
+      contextWindow: 262_144,
+      maxOutputTokens: 131_072,
+      thinkingConfig: { mode: 'effort' },
+    })
+  })
+
+  it('未命中返回 undefined', () => {
+    expect(recommendCatalogMetadata('cn:not-a-model')).toBeUndefined()
+  })
+
+  it('不泄漏身份与证据字段', () => {
+    const recommended = recommendCatalogMetadata('hy3')
+    expect(recommended).not.toHaveProperty('id')
+    expect(recommended).not.toHaveProperty('aliases')
+    expect(recommended).not.toHaveProperty('source')
+    expect(recommended).not.toHaveProperty('requestAdapter')
+  })
+
+  it('capabilities 与目录常量拷贝隔离', () => {
+    expect(recommendCatalogMetadata('hy3')!.capabilities).not.toBe(
+      findBuiltinModel('hy3')!.capabilities,
+    )
   })
 })

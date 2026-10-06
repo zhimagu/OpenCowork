@@ -26,6 +26,7 @@ export { MODEL_CATALOG_FETCHED_AT } from './helpers'
 export { OLLAMA_REASONING_EFFORTS, OLLAMA_STANDARD_THINKING } from './vendors/ollama'
 
 import type { BuiltinModelRecord } from './types'
+import type { ModelCatalogDefinition } from '../model-catalog'
 import type { UpstreamProtocol } from '../provider'
 import { OPENAI, OPENAI_MEDIA } from './vendors/openai'
 import { OLLAMA } from './vendors/ollama'
@@ -100,16 +101,57 @@ export const BUILTIN_MODEL_CATALOG: readonly BuiltinModelRecord[] = [
   ...INTERNLM,
 ]
 
-/** Case-insensitive lookup, including aliases and aggregator-prefixed IDs. */
+/**
+ * Case-insensitive lookup, including aliases, aggregator-prefixed IDs
+ * (`vendor/model`) and namespace-prefixed IDs (`region:model`, e.g. `cn:` /
+ * `global:`).
+ */
 export function findBuiltinModel(modelId: string): BuiltinModelRecord | undefined {
   const wanted = modelId.trim().toLowerCase()
   return BUILTIN_MODEL_CATALOG.find((entry) => {
     const ids = [entry.id, ...(entry.aliases ?? [])]
     return ids.some((id) => {
       const candidate = id.toLowerCase()
-      return wanted === candidate || wanted.endsWith(`/${candidate}`)
+      return (
+        wanted === candidate ||
+        wanted.endsWith(`/${candidate}`) ||
+        wanted.endsWith(`:${candidate}`)
+      )
     })
   })
+}
+
+/**
+ * 从内置目录反查模型元数据推荐值;未命中返回 undefined。
+ *
+ * 用途:供「添加自定义模型」表单反查预填。命名空间前缀(`region:model`,
+ * 如 `cn:` / `global:`)已由 `findBuiltinModel` 覆盖,这里不必重复处理。
+ * 不返回 id / aliases / source / requestAdapter —— 那些属于目录身份与
+ * 证据,用户自定义行不该继承。capabilities / thinkingConfig 浅拷贝、
+ * reasoningEfforts 拷贝数组,避免调用方编辑时改到目录常量。
+ */
+export function recommendCatalogMetadata(
+  modelId: string
+): Partial<ModelCatalogDefinition> | undefined {
+  const known = findBuiltinModel(modelId)
+  if (known === undefined) return undefined
+  return {
+    displayName: known.displayName,
+    manufacturerId: known.manufacturerId,
+    manufacturerLabel: known.manufacturerLabel,
+    modality: known.modality,
+    capabilities: { ...known.capabilities },
+    contextWindow: known.contextWindow,
+    maxOutputTokens: known.maxOutputTokens,
+    thinkingConfig: { ...known.thinkingConfig },
+    ...(known.reasoningEfforts === undefined
+      ? {}
+      : { reasoningEfforts: [...known.reasoningEfforts] }),
+    ...(known.pricingModelId === undefined ? {} : { pricingModelId: known.pricingModelId }),
+    ...(known.verificationStatus === undefined
+      ? {}
+      : { verificationStatus: known.verificationStatus }),
+  }
 }
 
 /**
@@ -129,12 +171,7 @@ export function findBuiltinModel(modelId: string): BuiltinModelRecord | undefine
  */
 export function isImageModelId(modelId: string): boolean {
   const wanted = modelId.trim().toLowerCase()
-  const known = BUILTIN_MODEL_CATALOG.find((model) =>
-    [model.id, ...(model.aliases ?? [])].some((id) => {
-      const value = id.toLowerCase()
-      return wanted === value || wanted.endsWith(`/${value}`)
-    }),
-  )
+  const known = findBuiltinModel(modelId)
   if (known !== undefined) return known.modality === 'image'
   return /(?:^|[/_:-])(image|imagen|dall[-_]?e|dalle|flux|seedream|seedance|z[-_]?image|imagegen|imagine|wanx|kolors|sdxl|stable[-_]?diffusion|ideogram|midjourney|recraft|qwen[-_]?image|pixart|playground)(?:$|[/:.-])/i.test(wanted)
 }

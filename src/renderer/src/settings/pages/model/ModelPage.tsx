@@ -13,7 +13,7 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ModelAlias,
   ModelCapabilities,
@@ -36,6 +36,7 @@ import {
 import {
   BUILTIN_MODEL_CATALOG,
   MODEL_MANUFACTURERS,
+  recommendCatalogMetadata,
   type ReasoningEffort,
 } from "../../../../../shared/domain/model-catalog-inventory";
 import { EmptyState } from "../../../components/ui/EmptyState";
@@ -843,6 +844,67 @@ function CatalogModelEditor({
   const [error, setError] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
 
+  // 按模型 ID 反查内置目录；仅新增模型时提供智能补充。未命中即为 undefined。
+  const recommendation = useMemo(
+    () => (isNew ? recommendCatalogMetadata(draft.id) : undefined),
+    [isNew, draft.id],
+  );
+  // 记录上一次应用建议后写入的值：作为「未被用户手改」的基线，改 ID 后可刷新这些字段。
+  const appliedRef = useRef<Partial<CatalogDraft> | null>(null);
+
+  const applyRecommendation = (): void => {
+    if (recommendation === undefined) return;
+    // setDraft 的 updater 必须保持纯函数。副作用(appliedRef 写入)移出 updater,
+    // 否则 dev StrictMode 双调用时,被丢弃的第一次调用会先污染基线,
+    // 第二次(真正采用的)调用读到被污染的基线后会跳过全部字段,应用建议静默失效。
+    const baseline = appliedRef.current;
+    const blank = blankCatalogModel();
+    const next: CatalogDraft = { ...draft };
+    const applied: Partial<CatalogDraft> = { ...(baseline ?? {}) };
+    // 逐字段合并：当前值仍等于基线（即用户没手改过）才接受推荐值，否则保留用户输入。
+    const applyField = <K extends keyof CatalogDraft>(
+      key: K,
+      value: CatalogDraft[K] | undefined,
+    ): void => {
+      if (value === undefined) return;
+      const baseValue =
+        baseline !== null && key in baseline ? baseline[key] : blank[key];
+      if (JSON.stringify(next[key]) !== JSON.stringify(baseValue)) return;
+      next[key] = value;
+      applied[key] = value;
+    };
+    applyField("displayName", recommendation.displayName);
+    applyField("manufacturerId", recommendation.manufacturerId);
+    applyField("manufacturerLabel", recommendation.manufacturerLabel);
+    applyField("modality", recommendation.modality);
+    applyField("capabilities", recommendation.capabilities);
+    applyField("contextWindow", recommendation.contextWindow);
+    applyField("maxOutputTokens", recommendation.maxOutputTokens);
+    applyField("thinkingConfig", recommendation.thinkingConfig);
+    applyField("reasoningEfforts", recommendation.reasoningEfforts);
+    applyField("pricingModelId", recommendation.pricingModelId);
+    applyField("verificationStatus", recommendation.verificationStatus);
+    // 输出上限不能超过上下文窗口，覆盖后同步钳制。
+    if (next.maxOutputTokens > next.contextWindow) {
+      next.maxOutputTokens = next.contextWindow;
+      applied.maxOutputTokens = next.maxOutputTokens;
+    }
+    // effort 模式下默认等级必须出现在可选列表中，缺则追加。
+    if (
+      next.thinkingConfig.mode === "effort" &&
+      next.thinkingConfig.defaultEffort !== undefined
+    ) {
+      const efforts = next.reasoningEfforts ?? [];
+      if (!efforts.includes(next.thinkingConfig.defaultEffort)) {
+        const merged = [...efforts, next.thinkingConfig.defaultEffort];
+        next.reasoningEfforts = merged;
+        applied.reasoningEfforts = merged;
+      }
+    }
+    appliedRef.current = applied;
+    setDraft(next);
+  };
+
   const setCapability = (
     key: keyof ModelCapabilities,
     value: boolean,
@@ -1071,6 +1133,23 @@ function CatalogModelEditor({
           </button>
         )}
       </div>
+
+      {isNew && recommendation !== undefined && (
+        <div className="flex items-center justify-between gap-2 rounded-[7px] border border-accent/30 bg-accent/5 px-2.5 py-2 text-[11px]">
+          <span className="text-fg-muted">
+            {t("models.recommendationMatch", {
+              name: recommendation.displayName ?? draft.id,
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={applyRecommendation}
+            className="rounded-[6px] px-2 py-1 text-[10.5px] text-accent hover:bg-accent/10"
+          >
+            {t("models.applyRecommendation")}
+          </button>
+        </div>
+      )}
 
       {error !== null && (
         <div className="rounded-[7px] border border-danger/30 bg-danger/5 px-2.5 py-2 text-[11px] text-danger">

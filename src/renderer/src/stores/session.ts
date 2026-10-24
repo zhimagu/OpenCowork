@@ -10,7 +10,6 @@
  * 加上主进程侧 16–33ms 合批和这里的 rAF 再缓冲,就是全部的流式性能方案。
  * 不做 ack/流控 —— 真背压是研究课题(方案 §10)。
  */
-import { useMemo } from 'react'
 import { create, type UseBoundStore, type StoreApi } from 'zustand'
 import type { PermissionMode } from '../../../shared/agent/permission'
 import type { SessionChange, SessionPage } from '../../../shared/domain/session'
@@ -1446,15 +1445,34 @@ export function syncActiveRuns(entries: readonly RunIndexEntry[]): void {
 }
 
 /**
- * 正等着用户处理(审批 / 回答)的会话。应用内标一下,不强制切换。
+ * 从 run 索引派生「会话 id 集合」的共用骨架。
+ *
+ * ★ 派生结果的引用只在**集合成员变化**时才换新,不跟着 run 索引的每次广播换:
+ *   源数组换了但成员相同,照旧还旧 Set。订阅者因此只在成员真正增减时重渲染,
+ *   而拿到的引用也**可以往下传** —— memo 层不再怕它(不这么做的话,任何 run
+ *   的任何变化 —— 包括别家工作区的启停、pendingInteractions 的更新 —— 都会
+ *   换新引用,沿 props 走会击穿保活层,就地订阅也会多出无关重渲染)。
+ * ★ 缓存是模块级的(reselect 同款模式):同一份源数组恒返回同一个 Set 引用,
+ *   并发渲染下 selector 被重复调用也只是复写同一份确定性结果。
  */
-export function useAttentionSessionIds(): ReadonlySet<string> {
-  const runs = useRunIndex()
-  return useMemo(
-    () => new Set(runs.filter((run) => (run.pendingInteractions ?? 0) > 0).map((run) => run.sessionId)),
-    [runs]
-  )
+function idSetHook(pick: (run: RunIndexEntry) => boolean): () => ReadonlySet<string> {
+  let cache: { src: readonly RunIndexEntry[]; ids: ReadonlySet<string> } | null = null
+  return () =>
+    useRunIndex((runs) => {
+      if (cache?.src === runs) return cache.ids
+      const ids = new Set(runs.filter(pick).map((run) => run.sessionId))
+      const stable =
+        cache !== null && cache.ids.size === ids.size && [...ids].every((id) => cache!.ids.has(id))
+      cache = { src: runs, ids: stable ? cache!.ids : ids }
+      return cache.ids
+    })
 }
+
+/** 正在运行的会话。内层 Tab 条的转圈、侧边栏的圆点都认它。 */
+export const useRunningSessionIds = idSetHook(() => true)
+
+/** 正等着用户处理(审批 / 回答)的会话。应用内标一下,不强制切换。 */
+export const useAttentionSessionIds = idSetHook((run) => (run.pendingInteractions ?? 0) > 0)
 
 /**
  * 正常路径上,`run_end` 事件和这条广播是**同一刻**从主进程出发的,只是事件那边还要

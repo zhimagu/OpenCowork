@@ -29,7 +29,6 @@ import {
 import {
   Fragment,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -58,7 +57,7 @@ import { useI18n, type TranslationKey } from "../i18n";
 import { documentKey, isDocumentDirty, useDocumentsStore } from '../stores/documents';
 import { DOCK_TAB_MIME } from './dock-layout';
 import { Spinner } from '../components/ui/Spinner'
-import { useAttentionSessionIds, useRunIndex } from '../stores/session'
+import { useAttentionSessionIds, useRunningSessionIds } from '../stores/session'
 
 function revealTab(strip: HTMLDivElement | null, id: string | null): void {
   if (strip === null || id === null) return;
@@ -133,12 +132,11 @@ export function InnerTabBar({
   const { t } = useI18n();
   /*
     ★ D2/H1：运行中角标的数据源就在本组件订阅，不沿 Dock props 链透传。
-    理由：`App.tsx:222` 的 `new Set(...)` 在任何 run 变化时都换新引用，
-    沿 props 传入会击穿所有保活层的 `memo`。这里订阅同一份 RunRegistry 投影，
-    再把 `runIndex` useMemo 成 Set —— 重渲染范围收敛到本条 Tab 条。
+    理由：沿 props 传入的 Set 在任何 run 变化时都换新引用，会击穿所有保活层的
+    `memo`。这里订阅 store 里的具名 hook，重渲染范围收敛到本条 Tab 条，且引用
+    只在集合成员变化时才换新（见 `useRunningSessionIds`）。
   */
-  const runIndex = useRunIndex();
-  const runningSessionIds = useMemo(() => new Set(runIndex.map((run) => run.sessionId)), [runIndex]);
+  const runningSessionIds = useRunningSessionIds();
   const drafts = useDocumentsStore((state) => state.entries);
   // 没在看的会话停下来等审批 / 等回答:应用内标一下,不强制切过去
   const attentionSessionIds = useAttentionSessionIds();

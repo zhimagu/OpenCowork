@@ -19,6 +19,7 @@ import {
   getUsageSummary
 } from '../../../services/usage'
 import {
+  usageCacheHitRateOf,
   formatCompactNumber as compactNumber,
   formatCosts as costs,
   formatLatency as latency,
@@ -667,13 +668,14 @@ function DimensionTable({
   return (
     <section className="mt-3 overflow-hidden rounded-[12px] border border-border">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[700px] table-fixed border-collapse text-left">
+        <table className="w-full min-w-[800px] table-fixed border-collapse text-left">
           <thead className="text-[10.5px] text-fg-faint">
             <tr className="h-8 border-b border-hairline">
               <th className="px-3 font-normal">{heading}</th>
               <th className="w-[80px] px-2 text-right font-normal">{t('usage.requests')}</th>
               <th className="w-[90px] px-2 text-right font-normal">{t('usage.successRate')}</th>
               <th className="w-[145px] px-2 text-right font-normal">{t('usage.tokenBreakdown')}</th>
+              <th className="w-[96px] px-2 text-right font-normal">{t('usage.cacheHitRate')}</th>
               <th className="w-[112px] px-2 text-right font-normal">{t('usage.cost')}</th>
               <th className="w-[96px] px-3 text-right font-normal">{t('usage.averageLatency')}</th>
             </tr>
@@ -699,6 +701,9 @@ function DimensionTable({
                     cache: compactNumber(row.cacheReadTokens + row.cacheWriteTokens, locale),
                     output: compactNumber(row.outputTokens, locale)
                   })}
+                </td>
+                <td className="px-2 text-right tabular-nums text-fg-muted">
+                  {percent(usageCacheHitRateOf(row.inputTokens, row.cacheReadTokens), locale)}
                 </td>
                 <td className="px-2 text-right tabular-nums text-fg">{costs(row.costs, locale)}</td>
                 <td className="px-3 text-right tabular-nums text-fg-muted">

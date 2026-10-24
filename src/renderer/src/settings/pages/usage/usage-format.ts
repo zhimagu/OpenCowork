@@ -52,6 +52,24 @@ export function formatPercent(value: number | null, locale: Locale): string {
 }
 
 /**
+ * 使用统计口径的缓存命中率 = 缓存读取 ÷(输入 + 缓存读取)。
+ *
+ * ★ 与总览卡片的 `UsageSummary.cacheHitRate`(`main/db/repo.ts`)同一个公式:
+ * **排除**缓存写入与输出——这是既定口径,不是漏加。`shared/agent/transcript.ts`
+ * 里另有一个「单轮提示词缓存命中率」,分母是 `输入 + 读缓存 + 写缓存`,两者不可互换。
+ *
+ * ★ 公式相同不代表数字应严格相等:卡片是全量合计,表格是按模型分组后再算,
+ * 各行的加权平均本来就可以和总量不等,对不上不等于算错。
+ *
+ * ★ 分母为 0 时返回 `null`,由 `formatPercent` 显示「—」。「一条输入都没有」
+ * 和「命中率 0%」不是一回事。
+ */
+export function usageCacheHitRateOf(inputTokens: number, cacheReadTokens: number): number | null {
+  const denominator = inputTokens + cacheReadTokens
+  return denominator === 0 ? null : cacheReadTokens / denominator
+}
+
+/**
  * 单一币种金额。micros → 主单位。
  *
  * ★ 小于 1 分的金额放宽到 6 位小数。单次请求常常是 0.0003 美元,按 2 位显示

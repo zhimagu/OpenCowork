@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Translate } from '../../../../i18n'
 import {
+  usageCacheHitRateOf,
   formatCompactNumber,
   formatCostMicros,
   formatCosts,
@@ -63,6 +64,24 @@ describe('formatPercent', () => {
 
   it('保留一位小数', () => {
     expect(formatPercent(0.4567, 'en-US')).toBe('45.7%')
+  })
+})
+
+describe('usageCacheHitRateOf', () => {
+  it('缓存读取 ÷(输入 + 缓存读取)', () => {
+    expect(usageCacheHitRateOf(150, 300)).toBeCloseTo(300 / 450)
+  })
+
+  it('全部输入都来自缓存时是 1', () => {
+    expect(usageCacheHitRateOf(0, 500)).toBe(1)
+  })
+
+  it('一次都没命中是 0 —— 与 null 不是一回事', () => {
+    expect(usageCacheHitRateOf(500, 0)).toBe(0)
+  })
+
+  it('没有任何输入时返回 null,不是 0%', () => {
+    expect(usageCacheHitRateOf(0, 0)).toBeNull()
   })
 })
 

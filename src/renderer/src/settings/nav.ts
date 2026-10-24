@@ -21,8 +21,10 @@ export type SettingsPageId =
   | 'usage'
   | 'review'
   | 'connection'
+  | 'devices'
   | 'computer'
   | 'data'
+  | 'experimental'
   | 'about'
 
 export interface SettingsSub {
@@ -130,8 +132,18 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
       { id: 'network', label: '网络' }
     ]
   },
+  /**
+   * 第十三页:控制端本地的「已配对设备」。它和「连接」页的 SSH/MCP 是两回事 —— 那些是这台设备
+   * 去连别的东西,这一页是这台电脑去控制别的 NextCoWork 设备。
+   */
+  { id: 'devices', label: '设备' },
   { id: 'computer', label: '电脑操作' },
   { id: 'data', label: '数据' },
+  /**
+   * 尚未定型的功能,每一项都出厂关闭(见 `ExperimentalSettings`)。
+   * 放在「关于」前面、所有常规页之后:它不该是用户找东西时先看到的那一页。
+   */
+  { id: 'experimental', label: '实验' },
   { id: 'about', label: '关于' }
 ]
 
@@ -216,6 +228,24 @@ export const SETTINGS_INDEX: readonly SettingsRow[] = [
     sub: 'agent',
     title: '自动上下文压缩',
     keywords: ['compact', 'compression', '压缩']
+  },
+  {
+    page: 'general',
+    sub: 'agent',
+    title: '回合结束后建议下一步',
+    keywords: ['suggestion', 'autocomplete', 'ghost', 'tab', 'prompt', '补全', '建议', '灰字', '提示']
+  },
+  {
+    page: 'general',
+    sub: 'agent',
+    title: '历史与文件补全',
+    keywords: ['history', 'file', 'autocomplete', 'tab', '补全', '历史', '文件']
+  },
+  {
+    page: 'general',
+    sub: 'agent',
+    title: '打字时续写',
+    keywords: ['inline', 'autocomplete', 'completion', 'copilot', 'tab', '续写', '补全']
   },
   {
     page: 'general',
@@ -441,6 +471,18 @@ export const SETTINGS_INDEX: readonly SettingsRow[] = [
   { page: 'data', title: '清理范围', keywords: ['cleanup', 'range', '清理', '范围'] },
   { page: 'data', title: '清空对话历史', keywords: ['delete', 'history', '清空', '对话'] },
   { page: 'data', title: '删除并退出', keywords: ['delete', 'reset', '退出', '删除'] },
+
+  // ── 实验 ──
+  {
+    page: 'experimental',
+    title: 'Workflow 工作流',
+    keywords: ['experimental', 'labs', 'beta', 'workflow', 'canvas', '实验', '工作流', '画布', '编排']
+  },
+  {
+    page: 'experimental',
+    title: '运行前确认',
+    keywords: ['workflow', 'confirm', 'approval', '工作流', '确认', '审批']
+  },
 
   // ── 关于 ──
   { page: 'about', title: '版本', keywords: ['version', 'about', '版本'] }

@@ -46,7 +46,7 @@
  */
 import type { Currency, ModelPricing, PriceTier, TokenRates } from './pricing'
 
-/** 全表统一的采集日期。改数据时**同时**改它,否则界面上显示的日期是假的 */
+/** 历史快照的默认采集日期。新增或复核的行通过 extra.fetchedAt 记录实际日期。 */
 const FETCHED_AT = '2026-09-05'
 
 /** 单档(绝大多数模型)。多于一档才是阶梯,见下面 OpenAI / Gemini / xAI */
@@ -95,14 +95,18 @@ const maker =
  *
  * ★ **Anthropic 当前没有长上下文溢价档。** 对 14 页全文检索过:`CONTEXT WINDOW`
  * 一列只出现 `All` 与 `≤200K` 两种取值,**全文档没有任何一行 `>200K`**。
- * 所以 15 个 SKU 全部是单档 —— 这与 OpenAI / Gemini / xAI 都不同。
+ * 所以那 15 个 SKU 全部是单档 —— 这与 OpenAI / Gemini / xAI 都不同。
  * (OpenRouter 至今还给 Sonnet 4/4.5 挂着 `min_prompt_tokens: 200000` 的加价档,
  * 那是陈旧数据,照它算会**凭空多收用户的钱**。以 PDF 为准。)
+ * ★ 唯一例外是 2026-10-08 补录的 `claude-haiku-5-5`(不在那份 PDF 里):官方定价页
+ * 按 prompt 长度分两档,**阈值 100K**(不是别家的 200K / 272K),超档后五个计费项
+ * 一律 ×5 —— 见那一行的注释。
  *
  * ★★ **模型 ID 的可信度低于价格。** PDF 只给展示名("Claude Sonnet 4.6"),
- * 不给 API id。下面有六个 id 是有一手依据的(运行环境 / 用户直接给出):
+ * 不给 API id。下面有七个 id 是有一手依据的(运行环境 / 用户直接给出 / 官方对比表):
  * `claude-fable-5-1` / `claude-opus-5` / `claude-sonnet-5` /
- * `claude-haiku-4-5-20251001` / `claude-opus-5-5` / `claude-sonnet-5-5` ——
+ * `claude-haiku-4-5-20251001` / `claude-opus-5-5` / `claude-sonnet-5-5` /
+ * `claude-haiku-5-5` ——
  * 注意**版本号里的点写成连字符**,
  * 且 4.5 世代带日期后缀而新世代不带。其余九个按这条已证实的构词法推出来。
  *
@@ -154,6 +158,16 @@ const ANTHROPIC: readonly ModelPricing[] = [
   */
   anth('claude-sonnet-5-5', 'Claude Sonnet 5.5', one(claude(2, 10, 2.5, 4, 0.2)), { source: 'https://www.anthropic.com/pricing' }),
   anth('claude-sonnet-5', 'Claude Sonnet 5', one(claude(2, 10, 2.5, 4, 0.2))),
+  /*
+    需求:2026-10-08 用户点名收录 Haiku 5.5。五个数取自官方定价页(同日直读,
+    Models overview 对比表的「From $0.10 / $0.50」与之吻合)。
+    ★ Anthropic 段**唯一的两档行**:prompt ≤100K 与 >100K 分价,阈值 100K 含在低档
+    (`upToInputTokens` 是含的,官方原文 "up to 100,000 tokens")。高档五项一律 = 低档 ×5,
+    族内倍率(5m 写 1.25×、1h 写 2×、读 0.1×、输出 5×)在两档里各自成立。
+    `source` 指官方定价页而不是 2026-08-31 费率卡 PDF,理由同 Opus / Sonnet 5.5。
+    批处理价不收:批处理在 NOT_SEEDED 有排除记录。
+  */
+  anth('claude-haiku-5-5', 'Claude Haiku 5.5', two(100_000, claude(0.1, 0.5, 0.125, 0.2, 0.01), claude(0.5, 2.5, 0.625, 1, 0.05)), { source: 'https://www.anthropic.com/pricing' }),
   // 上一代同价位,但缓存读贵 4 倍($1.00)—— 正是「存绝对价、不存倍率」的证据
   anth('claude-mythos-5', 'Claude Mythos 5', one(claude(10, 50, 12.5, 20, 1.0))),
   anth('claude-fable-5', 'Claude Fable 5', one(claude(10, 50, 12.5, 20, 1.0))),
@@ -271,6 +285,14 @@ const OPENAI: readonly ModelPricing[] = [
 const gem = maker(null, 'USD', 'https://ai.google.dev/gemini-api/docs/pricing')
 
 const GEMINI: readonly ModelPricing[] = [
+  gem('gemini-4-argon', 'Gemini 4 Argon', one({ input: 2, output: 10, cacheRead: 0.1 }), {
+    effectiveUntil: '2026-11-30',
+    source: 'https://ai.google.dev/gemini-api/docs/pricing#gemini-4-argon',
+  }),
+  gem('gemini-4-argon', 'Gemini 4 Argon', one({ input: 4, output: 20, cacheRead: 0.2 }), {
+    effectiveFrom: '2026-12-01',
+    source: 'https://ai.google.dev/gemini-api/docs/pricing#gemini-4-argon',
+  }),
   gem('gemini-3.8-flash', 'Gemini 3.8 Flash', one({ input: 0.75, output: 3.75, cacheRead: 0.075 }), {
     effectiveUntil: '2026-12-31',
     source: 'https://ai.google.dev/gemini-api/docs/pricing#gemini-3.8-flash',
@@ -451,8 +473,15 @@ const ds = maker(null, 'USD', 'https://api-docs.deepseek.com/quick_start/pricing
 
 /** 基准 = **空闲价**(见文件头那段论证) */
 const DEEPSEEK: readonly ModelPricing[] = [
+  ds('deepseek-v4.1-flash-1017', 'DeepSeek V4.1 Flash 1017', one({ input: 0.15, output: 0.6, cacheRead: 0.003 }), {
+    windows: PEAK_WINDOWS,
+    fetchedAt: '2026-10-19',
+  }),
   ds('deepseek-v4-flash', 'DeepSeek V4 Flash', one({ input: 0.22, output: 0.66, cacheRead: 0.007 }), {
     windows: PEAK_WINDOWS,
+  }),
+  ds('deepseek-v4.1-flash-ultrafast', 'DeepSeek V4.1 Flash Ultrafast', one({ input: 0.3, output: 1.2, cacheRead: 0.006 }), {
+    source: 'https://nextco.work/models/deepseek-v4.1-flash-ultrafast',
   }),
   ds('deepseek-v4-pro', 'DeepSeek V4 Pro', one({ input: 0.66, output: 1.98, cacheRead: 0.022 }), {
     windows: PEAK_WINDOWS,

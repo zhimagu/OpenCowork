@@ -11,6 +11,7 @@
  * | §6 长任务无序号、不可重放 | **信封带 seq,可 attach(sinceSeq) 重放** |
  * | §2 每个 API 方法内部硬编码目标频道 | **由契约生成白名单**,preload 运行时校验 |
  */
+import type { WidgetActionPreflight, WidgetActionResult } from '../domain/widget'
 import type { AgentError } from '../agent/error'
 import type { ActiveRunEntry, AgentEvent, RunSnapshot } from '../agent/event'
 import type { AgentMessage, ContentPart } from '../agent/message'
@@ -18,10 +19,12 @@ import type { ContextPreview } from '../agent/context-management'
 import type { InteractionResponse, PendingInteraction } from '../agent/interaction'
 import type { InterjectItem } from '../agent/interject'
 import type { PermissionMode } from '../agent/permission'
-import type { RunRequest, SessionMode } from '../agent/run-request'
+import type { RunRequest, SendOptions, SessionMode } from '../agent/run-request'
 import type { ToolInfo } from '../agent/tool'
 import type { Bootstrap } from '../domain/bootstrap'
+import type { DeviceInvitationPreview, DevicesState } from '../domain/device-connection'
 import type { DirListing, FileSuggestion } from '../domain/file-tree'
+import type { ComposerCompletionContext } from '../domain/composer-completion'
 import type { ReviewChangeSet, ReviewFileDiff, ReviewMutationResult } from '../domain/review'
 import type { McpSecretsInfo, McpServerConfig, McpServerStatus } from '../domain/mcp'
 import type { ProxyPasswordInfo } from '../domain/proxy'
@@ -35,7 +38,15 @@ import type {
   AttachmentUploadRequest,
   PickedAttachment
 } from '../domain/attachment'
-import type { SessionInputState } from '../domain/queued-input'
+import type {
+  SessionInputPersistence,
+  SessionInputState,
+  SessionQueueOp,
+  SessionQueueResult,
+  SessionQueueSnapshot,
+  SubagentReportStatus
+} from '../domain/queued-input'
+import type { VideoJobView } from '../domain/video-generation'
 import type { SearchProviderId, SearchProviderStatus } from '../domain/search'
 import type {
   CredentialInfo,
@@ -47,12 +58,16 @@ import type {
   UpstreamProvider
 } from '../domain/provider'
 import type { ModelCatalogDefinition } from '../domain/model-catalog'
+import type { ModelPricing } from '../domain/pricing'
+import type { PricingSyncPreview } from '../domain/models-dev'
+import type { ModelCatalogSyncPreview } from '../domain/models-dev-catalog'
 import type { ProviderAccount } from '../domain/provider-account'
-import type { SearchHit, Session, SessionChange, SessionDetail, SessionListItem } from '../domain/session'
+import type { SearchHit, Session, SessionChange, SessionDetail, SessionListItem, SessionPage } from '../domain/session'
 import type { AppSettings, AppSettingsPatch, ResolvedTheme, StorageStats } from '../domain/settings'
 import type { InnerTabState, WindowKind, WindowTabState } from '../domain/tab'
 import type { ImageTheme, ThemeProfile } from '../domain/theme'
 import type { TerminalBuffer, TerminalCreateRequest, TerminalInfo, TerminalPreparation } from '../domain/terminal'
+import type { BackgroundShellInfo } from '../domain/shell'
 import type { SkillListItem, SkillMarketItem, SkillInstallScope } from '../domain/skill'
 import type { CommandDefinition } from '../domain/command'
 import type { AgentDraft } from '../domain/agent-def'
@@ -108,6 +123,7 @@ import type {
   GitCommitSummary,
   GitConflictResolution,
   GitDiff,
+  GitDiffSides,
   GitMergeResult,
   GitOverview
 } from '../domain/git'
@@ -259,6 +275,21 @@ export interface IpcInvokeMap {
   'app:updateInstall': { req: void; res: void }
   'app:updateGetState': { req: void; res: UpdateState }
   'app:copyText': { req: { text: string }; res: void }
+  // ── 设备(控制端本地:设备清单与配对凭据只在这台电脑上) ──
+  /** 已配对设备清单 + 当前选择与连接状态。不含证书/私钥。 */
+  'device:getState': { req: void; res: DevicesState }
+  /** 只解码并校验邀请(不联网),返回要让用户核对的设备指纹。 */
+  'device:inspectInvitation': { req: { text: string }; res: DeviceInvitationPreview }
+  /** 配对。`confirmedFingerprint` 必须是用户核对过的那一个,与邀请不一致即拒绝。 */
+  'device:pair': { req: { text: string; label: string; confirmedFingerprint: string }; res: DevicesState }
+  /** 切换到某台已配对设备并记住选择;连不上时保持「离线」,不回退本机。 */
+  'device:select': { req: { id: string }; res: DevicesState }
+  /** 回到本机。 */
+  'device:useLocal': { req: void; res: DevicesState }
+  /** 移除本机保存的连接(含私钥)。**不会**撤销设备上的配对。 */
+  'device:remove': { req: { id: string }; res: DevicesState }
+  /** 设置/清除(`url: null`)这台设备的备用中转(wss://…,自签证书可附 `caPem`)。直连永远优先。 */
+  'device:setRelay': { req: { id: string; url: string | null; caPem?: string }; res: DevicesState }
   /**
    * 把一张图写进系统剪贴板。`base64` 是**原图字节**,不带 `data:` 前缀。
    *
@@ -499,6 +530,8 @@ export interface IpcInvokeMap {
   'git:listCommits': { req: { workspaceId: string; limit?: number }; res: GitCommitSummary[] }
   /** 单个文件的 diff。`staged` 选择看暂存区还是工作区。 */
   'git:getDiff': { req: { workspaceId: string; path: string; staged: boolean }; res: GitDiff }
+  /** 同一份 diff 两侧的完整文本(代码对比视图用)。`null` = 没法按全文对比,退回 unified 文本 */
+  'git:getDiffSides': { req: { workspaceId: string; path: string; staged: boolean }; res: GitDiffSides | null }
   'git:stage': { req: { workspaceId: string; paths: string[] }; res: void }
   'git:unstage': { req: { workspaceId: string; paths: string[] }; res: void }
   /** 提交暂存区。`message` 空白一律拒 —— 空提交信息没有任何意义。 */
@@ -523,6 +556,27 @@ export interface IpcInvokeMap {
   /** 让 AI 逐个解决当前冲突文件并暂存。逐文件成败各自返回,不因单个失败中断。 */
   'git:resolveConflicts': { req: { workspaceId: string }; res: GitConflictResolution[] }
 
+  // ── 输入框补全(docs/composer-autocomplete.md)──
+  /**
+   * 回合结束后建议下一步。`text` 为空 = 不出声(模型选择沉默、条件不满足、失败、被取消一律如此)。
+   * ★ `triggerKey` 是渲染层看到的那次 `runEndedAt`:主进程按 (sessionId, triggerKey) 合流,
+   *   两个窗口开着同一条会话只发一次请求。
+   * ★ `model` 是输入框此刻的生效模型;设置里点名了补全模型时主进程改用那一个。
+   */
+  'composer:suggestNext': {
+    req: { requestId: string; workspaceId: string; sessionId: string; triggerKey: number; model: string; modelProviderId?: string }
+    res: { requestId: string; text: string }
+  }
+  /** 本工作区发过的指令(新→旧、去重、≤500 条),给本地历史补全用 */
+  'composer:history': { req: { workspaceId: string }; res: { prompts: string[] } }
+  /** 打字中续写。默认关;模型只取设置里点名的那一个 */
+  'composer:complete': {
+    req: { requestId: string; workspaceId: string; sessionId: string | null; draft: string; context: ComposerCompletionContext }
+    res: { requestId: string; text: string }
+  }
+  /** 取消上面两类请求中的一个。已经结束的 id 静默忽略 */
+  'composer:cancel': { req: { requestId: string }; res: void }
+
   // ── 定时任务 ──
   'scheduled:listTasks': { req: { workspaceId?: string }; res: ScheduledTask[] }
   'scheduled:getTask': { req: { id: string }; res: ScheduledTask | null }
@@ -544,6 +598,20 @@ export interface IpcInvokeMap {
    * 校验在主进程侧做,渲染层拿到的要么是可用的,要么是 null。
    */
   'session:getInput': { req: { sessionId: string }; res: SessionInputState | null }
+  /**
+   * 队列的写操作。★ **主进程是队列唯一的写入者**(`main/session-runtime.ts`):
+   * 续跑在那边决定,所以没有窗口在看这条会话时,排队的消息照样会被发出去。
+   * 回执即新的权威队列;同样的快照也经 `session:queueChanged` 广播给所有窗口。
+   */
+  'session:queue': { req: { sessionId: string; op: SessionQueueOp }; res: SessionQueueResult }
+  /**
+   * 用户在后台子代理卡片上点「处理」。`options` 是渲染层按工作区默认值拼的兜底档位 ——
+   * 本进程没见过这条会话发消息(重启之后)时,汇报靠它才发得出去。
+   */
+  'session:reportBackground': {
+    req: { sessionId: string; callId: string; options?: SendOptions }
+    res: { status: SubagentReportStatus }
+  }
 
   // ── 附件(上传走 invoke;读取走 ncw:// 协议,不经 IPC) ──
   /**
@@ -576,6 +644,21 @@ export interface IpcInvokeMap {
   'sessions:list': { req: { workspaceId: string; archived?: boolean }; res: SessionListItem[] }
   'sessions:get': { req: { sessionId: string }; res: SessionDetail }
   'sessions:replaceHistory': { req: { sessionId: string; messages: AgentMessage[] }; res: void }
+  /**
+   * 转录的一页(见 `SessionPage`)。渲染层打开会话、往上翻都走它 —— 不再一次读整段历史。
+   */
+  'sessions:getPage': { req: { sessionId: string; limit: number; beforeMessageId?: string }; res: SessionPage }
+  /** 会话元数据 + 消息条数,不读正文。只想知道模式 / 模型 / 标题的地方用它,别为此读整段转录 */
+  'sessions:getSummary': { req: { sessionId: string }; res: { session: Session; messageCount: number } }
+  /** 最后一条助手消息(后台子代理交差的正文),不读整段转录 */
+  'sessions:lastAssistant': { req: { sessionId: string }; res: AgentMessage | null }
+  /**
+   * 按消息 id 改写转录。★ 主进程在**完整历史**上改:渲染层手里只有一页,
+   * 拿那一页整段 `sessions:replaceHistory` 会把页外的历史当成「删掉了」。
+   */
+  'sessions:editMessage': { req: { sessionId: string; messageId: string; text: string; truncate: boolean }; res: void }
+  'sessions:deleteTurn': { req: { sessionId: string; userMessageId: string }; res: void }
+  'sessions:deleteReply': { req: { sessionId: string; fromId: string; toId: string }; res: void }
   'sessions:create': { req: { workspaceId: string; title?: string; sessionId?: string; mode?: SessionMode }; res: Session }
   'sessions:duplicate': { req: { sessionId: string; title: string }; res: Session }
   /** 从某一轮「分支」：只克隆到这一轮为止的转录，之后的内容不带过去。 */
@@ -629,10 +712,26 @@ export interface IpcInvokeMap {
   }
 
   // ── Agent ──
-  /** ★ runId 由调用方传入,不由这里返回(方案 §3 规则 2) */
-  'agent:run': { req: RunRequest; res: void }
+  /**
+   * ★ runId 由调用方传入,不由这里返回(方案 §3 规则 2)。
+   * `started: false` = 这条会话其实已经在跑(排队消息刚续上、或另一个窗口先发了),
+   * 这句话被放进了队列;回执里是新的队列,调用方据此撤掉乐观消息。
+   */
+  'agent:run': { req: RunRequest; res: { started: true } | { started: false; queue: SessionQueueResult } }
   'agent:attach': { req: { runId: string; sinceSeq: number }; res: RunSnapshot }
+  /**
+   * 这个窗口不再看这个 run(及其子代理)的正文 —— 会话 Tab 关了 / 切走一段时间了。
+   * ★ 只摘**调用方自己**的订阅,不停 run、不影响别的窗口。再看时走 `agent:attach`。
+   */
+  'agent:unwatch': { req: { runId: string }; res: void }
   'agent:abort': { req: { runId: string; cascade: boolean }; res: void }
+  /**
+   * 把一个**前台**子代理转去后台:父代理那次 `Task` 调用不再等它、当场返回,
+   * 子代理继续跑,结论之后按后台子代理那条路送回主代理。
+   *
+   * 返回 `false` = 没转成(它已经跑完 / 本来就是后台 / 不在这个进程里)。不是错误。
+   */
+  'agent:backgroundSubagent': { req: { childRunId: string }; res: boolean }
   /**
    * 插话 —— 把这些条目排进正在跑的那个 run,由它在**下一个轮次边界**注入。
    *
@@ -657,6 +756,19 @@ export interface IpcInvokeMap {
   /** ★ 审批 / 反问 / 计划确认三种 kind 共用这一个(方案 §4.6) */
   'agent:respondInteraction': { req: InteractionResponse; res: void }
   'agent:listInteractions': { req: { runId?: string; sessionId?: string }; res: PendingInteraction[] }
+  /**
+   * 对话里 widget 的宿主能力(`main/ipc/widget.ts`)。iframe 碰不到 IPC,这几条都由
+   * 渲染层 `WidgetFrame` 在校验过 iframe 报文之后代发。
+   */
+  'widget:getState': { req: { sessionId: string; callId: string }; res: unknown }
+  'widget:setState': { req: { sessionId: string; callId: string; state: unknown }; res: void }
+  'widget:submit': { req: { callId: string; value: string | null }; res: void }
+  'widget:runAction': {
+    req: { sessionId: string; callId: string; actionId: string; params: Record<string, unknown>; confirmed: boolean }
+    res: WidgetActionPreflight | ({ kind: 'result' } & WidgetActionResult)
+  }
+  'widget:complete': { req: { sessionId: string; prompt: string; system?: string; maxTokens?: number }; res: string }
+  'widget:saveFile': { req: { name: string; data: string; encoding: 'utf8' | 'base64' }; res: { path: string } | null }
   'agent:listTools': { req: { workspaceId: string }; res: ToolInfo[] }
 
   // ── Agent 的 shell ──
@@ -672,6 +784,33 @@ export interface IpcInvokeMap {
    * 调用方不必提示 —— 用户要的结果已经达成。
    */
   'shell:stopToolCall': { req: { runId: string; callId: string }; res: boolean }
+  /**
+   * 把**这一条**正在跑的前台命令转去后台 —— 工具卡片上那颗「转后台」按钮。
+   *
+   * 命令不被杀,只是不再被等:这次工具调用当场返回(带上到目前为止的输出和一个
+   * shell id),命令作为后台 shell 继续跑,模型之后用 `BashOutput` / `KillShell` 管它。
+   *
+   * 返回 `false` = 没转成:已经跑完了、这个环境转不了(SSH),或后台 shell 名额已满。
+   * 与 `shell:stopToolCall` 同理不是错误。
+   */
+  'shell:backgroundToolCall': { req: { runId: string; callId: string }; res: boolean }
+  /**
+   * 这个工作区里 agent 开过的后台 shell(含已结束、还没被淘汰的)—— 右上角活动胶囊的
+   * 初始数据。之后的变化走 `shell:backgroundChanged`。
+   */
+  'shell:listBackground': { req: { workspaceId: string }; res: BackgroundShellInfo[] }
+  /**
+   * 看一眼某个后台 shell 的输出尾巴。★ **不消费**模型那份 `BashOutput` 缓冲 ——
+   * 界面看过一眼,模型下次照样读得到(见 `agent-shells.ts` 的 `tail`)。
+   * `null` = 它已经被淘汰了,不是错误。
+   */
+  'shell:peekBackground': { req: { id: string }; res: { info: BackgroundShellInfo; output: string } | null }
+  /**
+   * 用户在活动面板里停掉一个后台 shell。与模型调 `KillShell` 是同一件事,
+   * 状态记成 `killed`,模型下次 `BashOutput` 会读到「被停了」。
+   * `null` = 它已经被淘汰了。
+   */
+  'shell:killBackground': { req: { id: string }; res: BackgroundShellInfo | null }
 
   // ── 终端 ──
   'terminal:create': { req: TerminalCreateRequest; res: TerminalInfo }
@@ -954,7 +1093,16 @@ export interface IpcInvokeMap {
   }
   'goal:clear': { req: { sessionId: string }; res: void }
 
+
+
   // ── 供应商 / 模型别名 ──
+  // ── 视频生成任务(见下面未实现清单上那段:它不走 agent:event)──
+  'video:listBySession': { req: { sessionId: string }; res: VideoJobView[] }
+  'video:get': { req: { id: string }; res: VideoJobView | undefined }
+  'video:cancel': { req: { id: string }; res: { ok: true; state: 'requested' | 'already-done' } | { ok: false; reason: string } }
+  'video:retryRetrieval': { req: { id: string }; res: { ok: boolean; reason?: string } }
+  'video:saveFile': { req: { id: string; defaultName?: string }; res: { path: string } | null }
+
   'provider:list': { req: void; res: UpstreamProvider[] }
   /** 解析本机 Claude Code / Codex / OpenCode 里配置的提供商供审核。★ 只回元数据,不回密钥值。 */
   'providers:listImportable': { req: { sourceKind: ImportSourceKind; pickedDir?: string }; res: ImportableProviders }
@@ -1076,6 +1224,15 @@ export interface IpcInvokeMap {
   'modelCatalog:list': { req: void; res: ModelCatalogDefinition[] }
   'modelCatalog:upsert': { req: ModelCatalogDefinition; res: ModelCatalogDefinition }
   'modelCatalog:remove': { req: { id: string }; res: void }
+  /** models.dev 模型目录同步:只新增目录里没有的;apply 取主进程缓存的预览,界面传不来任意数据。 */
+  'modelCatalog:syncPreview': { req: void; res: ModelCatalogSyncPreview }
+  'modelCatalog:syncApply': { req: { ids: string[] }; res: { applied: number } }
+
+  /** models.dev 定价同步。预览不落盘;apply 只采用用户勾选的条目,价格取主进程缓存的那次预览。 */
+  'pricing:listSynced': { req: void; res: ModelPricing[] }
+  'pricing:syncPreview': { req: void; res: PricingSyncPreview }
+  'pricing:syncApply': { req: { modelIds: string[] }; res: { applied: number } }
+  'pricing:clearSynced': { req: void; res: void }
 
   // ── 使用统计 ──
   'usage:getSummary': { req: UsageWindow; res: UsageSummary }
@@ -1238,18 +1395,16 @@ export interface IpcSendMap {
   'tabs:persistInner': { workspaceId: string; state: InnerTabState }
 
   /**
-   * 未发出的输入落盘。★ **`immediate` 分两档,这是与 Tab 布局唯一的不同**:
+   * 草稿落盘。主进程侧防抖 500ms(`immediate` 跳过防抖,用于草稿 Tab 绑定会话、撤回到输入框这类
+   * 离散动作)。
    *
-   * - 草稿每次按键都变 → `false`,走同一个 500ms 防抖,丢失窗口 ≤500ms,代价是半个词。
-   * - 入队/插话/编辑/删除是离散低频动作 → `true`,立即写。丢一整条排队消息的代价
-   *   远高于丢半个词,而这类操作的频率低到根本不值得防抖。
-   *
-   * 强杀(kill -9)拦不住任何一档 —— 这正是队列走立即写、只让草稿承担
-   * 那 500ms 风险窗口的原因。
+   * ★ **只有草稿,不带队列。** 队列由主进程独占(见 `session:queue`);渲染层整份覆盖的话,
+   * 一次迟到的草稿防抖会把主进程刚刚消费掉的排队消息写回去,同一句话被续跑两次。
+   * 强杀(kill -9)仍拦不住那 500ms 的草稿窗口 —— 代价是半个词。
    */
-  'session:persistInput': {
+  'session:persistDraft': {
     sessionId: string
-    state: SessionInputState
+    draft: string
     immediate: boolean
   }
 }
@@ -1285,6 +1440,23 @@ export interface IpcEventMap {
    *   **能在丢过消息之后自己收敛**。
    */
   'agent:activeRuns': { runs: ActiveRunEntry[] }
+  /**
+   * 某条会话的排队消息变了(入队、插话、续跑消费、送达回执)。**全量 + 全局广播**:
+   * 队列是「这条会话还欠着什么」的事实,与谁在看哪个 run 无关,且条数有上限(20 条)。
+   * `rev` 单调递增,渲染层只收比手上更新的那份 —— 它与 `session:queue` 的回执可能乱序到达。
+   */
+  'session:queueChanged': SessionQueueSnapshot
+  /** 后台子代理的结果交回主代理到了哪一步。卡片上的「待汇报 / 已汇报」读它 */
+  'session:subagentReport': { sessionId: string; callId: string; status: SubagentReportStatus }
+  /**
+   * 某条会话的输入(草稿 + 队列)这一次落盘成没成。**全量 + 全局广播**:
+   * 「这条会话的话还没保住」是应用级事实,与谁在看哪个 run 无关。
+   *
+   * ★ 载荷里**没有异常**:见 `SessionInputPersistence` 的注释。
+   * ★ 生产端是 `session-runtime` 的 `onPersistenceChange`(经 `services/agent.ts`
+   *   的投递端口转发),渲染层据此弹 / 撤一条持久错误 toast。
+   */
+  'session:inputPersistence': SessionInputPersistence
   'terminal:data': { id: string; seq: number; chunk: string }
   'terminal:exit': { id: string; code: number }
   /**
@@ -1293,8 +1465,30 @@ export interface IpcEventMap {
    * (`shell/WindowControls.tsx`)据此在「□」和「双叠框」之间换字形。
    */
   'window:maximized': { maximized: boolean }
+  /**
+   * 这个窗口被最小化 / 隐藏(`false`)或者又露出来了(`true`)。**每窗口一份**,定向推。
+   *
+   * ★ `false` 发出之前主进程已经摘掉了它对所有 run 正文的订阅 —— 藏着的窗口
+   * 不再接收、也不再累积任何正文。`true` 时渲染层按快照 + 历史重建它正在看的会话。
+   * 失焦不算:副屏上还开着的窗口仍然要看见新内容。
+   */
+  'window:visibility': { visible: boolean }
   'gateway:status': GatewayStatus
   'gateway:failover': FailoverEvent
+  /**
+   * 视频任务状态变化。**全量广播**(谁在跑视频是应用级事实,不是"我这个窗口
+   * 在看的那一个"),带一个单调递增的 revision,渲染层据此做增量合并。
+   *
+   * ★ 与 `agent:activeRuns` 同一个理由:它必须能在丢过消息之后自己收敛 ——
+   * 而渲染层还可以用 `video:listBySession` 主动补齐。
+   */
+  'video:jobChanged': VideoJobView
+  /**
+   * 后台 shell 列表变了(新开、退出、被杀、被淘汰)。**全量 + 全局广播**,
+   * 理由同 `agent:activeRuns`:丢过一条之后下一条自己收敛。渲染层按 `workspaceId` 自己筛。
+   * ★ 输出增长不发 —— 刷日志的进程会把这条频道淹没,输出由面板展开时自己去 peek。
+   */
+  'shell:backgroundChanged': { shells: BackgroundShellInfo[] }
   'settings:changed': AppSettings
   'theme:changed': { resolved: ResolvedTheme }
   'theme:libraryChanged': { profiles: ThemeProfile[]; images: ImageTheme[] }
@@ -1415,6 +1609,8 @@ export interface IpcEventMap {
   'agents:changed': void
   'modes:changed': void
   'hooks:changed': void
+  /** 已配对设备清单或连接状态变了(配对、切换、掉线、移除)。 */
+  'device:changed': DevicesState
   /** 某条会话的目标变了（设立 / 轮数推进 / 清除）。`goal` 缺席 = 现在没有目标。 */
   'goal:changed': GoalChange
   'mcp:changed': { servers: McpServerStatus[] }
@@ -1429,6 +1625,8 @@ export interface IpcEventMap {
   'scheduled:focusRun': { runId: string }
   /** The persisted user catalogue changed. Built-in rows are bundled code. */
   'modelCatalog:changed': { custom: ModelCatalogDefinition[] }
+  /** 同步价目变了(采用 / 清除)。带全量,渲染层直接替换。 */
+  'pricing:changed': { synced: ModelPricing[] }
   /**
    * 上游供应商或别名变了。**两张表一起带**,因为设置页左列的每一行都是
    * 「供应商 + 它的主别名」—— 只推 providers 的话,改完供应商名字副标题还是旧的,
@@ -1539,6 +1737,13 @@ export const INVOKE_CHANNELS = {
   'app:updateInstall': 1,
   'app:updateGetState': 1,
   'app:copyText': 1,
+  'device:getState': 1,
+  'device:inspectInvitation': 1,
+  'device:pair': 1,
+  'device:select': 1,
+  'device:useLocal': 1,
+  'device:remove': 1,
+  'device:setRelay': 1,
   'app:copyImage': 1,
   'app:saveTextFile': 1,
   'app:saveImageFile': 1,
@@ -1622,6 +1827,7 @@ export const INVOKE_CHANNELS = {
   'git:listBranches': 1,
   'git:listCommits': 1,
   'git:getDiff': 1,
+  'git:getDiffSides': 1,
   'git:stage': 1,
   'git:unstage': 1,
   'git:commit': 1,
@@ -1633,8 +1839,14 @@ export const INVOKE_CHANNELS = {
   'git:merge': 1,
   'git:abortMerge': 1,
   'git:resolveConflicts': 1,
+  'composer:suggestNext': 1,
+  'composer:history': 1,
+  'composer:complete': 1,
+  'composer:cancel': 1,
   'tabs:getInner': 1,
   'session:getInput': 1,
+  'session:queue': 1,
+  'session:reportBackground': 1,
   'attachment:upload': 1,
   'attachment:pick': 1,
   'attachment:remove': 1,
@@ -1645,6 +1857,12 @@ export const INVOKE_CHANNELS = {
   'sessions:list': 1,
   'sessions:get': 1,
   'sessions:replaceHistory': 1,
+  'sessions:getPage': 1,
+  'sessions:getSummary': 1,
+  'sessions:lastAssistant': 1,
+  'sessions:editMessage': 1,
+  'sessions:deleteTurn': 1,
+  'sessions:deleteReply': 1,
   'sessions:create': 1,
   'sessions:duplicate': 1,
   'sessions:branch': 1,
@@ -1658,13 +1876,25 @@ export const INVOKE_CHANNELS = {
   'conversations:searchAll': 1,
   'agent:run': 1,
   'agent:attach': 1,
+  'agent:unwatch': 1,
   'agent:abort': 1,
+  'agent:backgroundSubagent': 1,
   'agent:interject': 1,
   'agent:setPermissionMode': 1,
   'agent:respondInteraction': 1,
   'agent:listInteractions': 1,
+  'widget:getState': 1,
+  'widget:setState': 1,
+  'widget:submit': 1,
+  'widget:runAction': 1,
+  'widget:complete': 1,
+  'widget:saveFile': 1,
   'agent:listTools': 1,
   'shell:stopToolCall': 1,
+  'shell:backgroundToolCall': 1,
+  'shell:listBackground': 1,
+  'shell:peekBackground': 1,
+  'shell:killBackground': 1,
   'terminal:create': 1,
   'terminal:prepare': 1,
   'terminal:approve': 1,
@@ -1752,6 +1982,11 @@ export const INVOKE_CHANNELS = {
   'goal:get': 1,
   'goal:set': 1,
   'goal:clear': 1,
+  'video:listBySession': 1,
+  'video:get': 1,
+  'video:cancel': 1,
+  'video:retryRetrieval': 1,
+  'video:saveFile': 1,
   'provider:list': 1,
   'providers:listImportable': 1,
   'provider:upsert': 1,
@@ -1785,6 +2020,12 @@ export const INVOKE_CHANNELS = {
   'modelCatalog:list': 1,
   'modelCatalog:upsert': 1,
   'modelCatalog:remove': 1,
+  'modelCatalog:syncPreview': 1,
+  'modelCatalog:syncApply': 1,
+  'pricing:listSynced': 1,
+  'pricing:syncPreview': 1,
+  'pricing:syncApply': 1,
+  'pricing:clearSynced': 1,
   'usage:getSummary': 1,
   'usage:getRequestLogs': 1,
   'usage:getSessionAttempts': 1,
@@ -1850,7 +2091,7 @@ export const SEND_CHANNELS = {
   'app:quitConfirmed': 1,
   'tabs:persistOuter': 1,
   'tabs:persistInner': 1,
-  'session:persistInput': 1
+  'session:persistDraft': 1
 } as const satisfies Record<keyof IpcSendMap, 1>
 
 export const EVENT_CHANNELS = {
@@ -1859,9 +2100,13 @@ export const EVENT_CHANNELS = {
   'connection:auth': 1,
   'agent:event': 1,
   'agent:activeRuns': 1,
+  'session:queueChanged': 1,
+  'session:subagentReport': 1,
+  'session:inputPersistence': 1,
   'terminal:data': 1,
   'terminal:exit': 1,
   'window:maximized': 1,
+  'window:visibility': 1,
   'gateway:status': 1,
   'gateway:failover': 1,
   'settings:changed': 1,
@@ -1882,6 +2127,7 @@ export const EVENT_CHANNELS = {
   'agents:changed': 1,
   'modes:changed': 1,
   'hooks:changed': 1,
+  'device:changed': 1,
   'goal:changed': 1,
   'mcp:changed': 1,
   'provider:changed': 1,
@@ -1895,6 +2141,7 @@ export const EVENT_CHANNELS = {
   'browser:cua': 1,
   'browser:profilesChanged': 1,
   'modelCatalog:changed': 1,
+  'pricing:changed': 1,
   'clientAuth:changed': 1
   ,'configSync:changed': 1
   ,'app:updateChanged': 1
@@ -1902,6 +2149,9 @@ export const EVENT_CHANNELS = {
   ,'scheduled:changed': 1
   ,'scheduled:focusRun': 1
   ,'dataMigration:progress': 1
+  // 视频任务状态变化(revision 单调递增,渲染层据此做增量合并)。
+  ,'video:jobChanged': 1
+  ,'shell:backgroundChanged': 1
 } as const satisfies Record<keyof IpcEventMap, 1>
 
 // ═══════════════════════════════════════════════════════════════

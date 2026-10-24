@@ -23,7 +23,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useI18n } from '../../i18n'
 import { Spinner } from '../../components/ui/Spinner'
-import { Tooltip } from '../../components/ui/Tooltip'
+import { Tooltip } from '../../components/arc/tooltip/tooltip'
 import { cn } from '../../lib/cn'
 import { motionScale, useMotionLevel } from '../../theme/useMotionLevel'
 
@@ -269,7 +269,7 @@ export function TaskChecklistRows({
             // 始终是转录里的原值:档位只改怎么画,不改这一项究竟是什么状态
             data-task-status={item.status}
             className={cn(
-              'flex min-h-8 items-center gap-2 rounded-[7px] px-1.5 py-1 text-[12px]',
+              'flex min-h-8 items-center gap-2 rounded-[8px] px-1.5 py-1 text-[12px]',
               showActive && 'bg-accent/[0.045]',
               highlight?.has(item.content) === true && 'bg-tint-hover/50'
             )}
@@ -405,21 +405,8 @@ export function TaskChecklist({
         defaultCollapsed={defaultCollapsed}
         className={className}
         {...(minimizeToBall ? {
-          ball: (restore: () => void) => (
-            <Tooltip
-              // `flex`:浮层的锚点是个 span,默认 inline 会在球底下垫出一条基线空隙,
-              // 而球是靠 `self-end` 贴着那一格底边的(见 Shell),垫高就对不齐了
-              className="flex"
-              align="center"
-              content={activeHint === undefined ? undefined : (
-                <span className="block">
-                  <span className="block text-[11px] text-fg">{activeHint}</span>
-                  <span className="mt-0.5 block text-[10.5px] text-fg-faint">
-                    {t('chat.taskChecklist', { done, total: todos.length })}
-                  </span>
-                </span>
-              )}
-            >
+          ball: (restore: () => void) => {
+            const ball = (
               <button
                 type="button"
                 data-testid="task-checklist-ball"
@@ -450,8 +437,28 @@ export function TaskChecklist({
                   <span aria-hidden className="absolute top-0 right-0 size-2 rounded-pill bg-warning" />
                 )}
               </button>
-            </Tooltip>
-          )
+            )
+            /*
+              Arc 的 Tooltip 是 asChild:没有包裹层,球直接当触发器(以前那层 span 要靠
+              `flex` 才不垫出基线空隙,现在没有这个问题)。没有正在做的那一项时不挂提示,
+              球上的原生 `title` 就是唯一的悬停说明。
+              ★ 提示底色是反相的(深底浅字),里面不能写 `text-fg` 这类颜色类。
+            */
+            return activeHint === undefined ? ball : (
+              <Tooltip
+                content={
+                  <span className="block">
+                    <span className="block">{activeHint}</span>
+                    <span className="mt-0.5 block opacity-70">
+                      {t('chat.taskChecklist', { done, total: todos.length })}
+                    </span>
+                  </span>
+                }
+              >
+                {ball}
+              </Tooltip>
+            )
+          }
         } : {})}
         list={<TaskChecklistRows todos={todos} isActive={isActive} />}
         header={({ toggle, collapsed, listId }) => (
@@ -515,7 +522,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 9
  * 进度环 + 完成数。标题行和缩起后的小球画的是**同一颗**:小球是这一行缩出来的,
  * 两处长得不一样,用户就认不出它们是同一个东西。
  */
-function ProgressRing({ progress, done }: { progress: number; done: number }): ReactNode {
+export function ProgressRing({ progress, done }: { progress: number; done: number }): ReactNode {
   return (
     <span aria-hidden className="relative flex size-6 shrink-0 items-center justify-center">
       <svg className="absolute inset-0 -rotate-90" width="24" height="24" viewBox="0 0 24 24" aria-hidden>

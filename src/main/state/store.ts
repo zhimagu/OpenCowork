@@ -19,6 +19,7 @@ import type { McpServerConfig } from '../../shared/domain/mcp'
 import type { ModelAlias, UpstreamProvider } from '../../shared/domain/provider'
 import type { ProviderAccountLimit, ProviderQuotaSnapshot } from '../../shared/domain/provider-account'
 import type { ModelCatalogDefinition } from '../../shared/domain/model-catalog'
+import type { ModelPricing } from '../../shared/domain/pricing'
 import type { SearchProviderConfig, SearchProviderId } from '../../shared/domain/search'
 import type { AppSettings, AppSettingsPatch } from '../../shared/domain/settings'
 import type { InnerTabState, WindowTabState } from '../../shared/domain/tab'
@@ -26,7 +27,7 @@ import type { Workspace } from '../../shared/domain/workspace'
 import type { ConnectionProfile } from '../../shared/domain/environment'
 import type { ScheduledRun, ScheduledTask, ScheduledTaskInput } from '../../shared/domain/scheduled'
 import { normalizeScheduledTaskInput, nextScheduledOccurrence } from '../../shared/domain/scheduled'
-import type { Session, SessionDetail, SessionListItem, SearchHit } from '../../shared/domain/session'
+import type { Session, SessionDetail, SessionListItem, SessionPage, SearchHit } from '../../shared/domain/session'
 import type { ChangeSetState, ReviewChangeSet, ReviewFileDiff } from '../../shared/domain/review'
 import type {
   UsageActivityStats,
@@ -193,6 +194,10 @@ export const store = {
   listProviders(): UpstreamProvider[] {
     return repo.listProviders()
   },
+  /** 供应商是否由 `providers.json` 管理(见 `db/provider-file.ts`)。 */
+  usesProviderFile(): boolean {
+    return repo.providerFileStore() !== null
+  },
   putProvider(p: UpstreamProvider): UpstreamProvider {
     return repo.putProvider(p)
   },
@@ -326,6 +331,17 @@ export const store = {
     repo.removeUserModelCatalog(id)
   },
 
+  // ── synced pricing (models.dev) ──
+  listSyncedPricing(): ModelPricing[] {
+    return repo.listSyncedPricing()
+  },
+  replaceSyncedPricing(rows: readonly ModelPricing[]): void {
+    repo.replaceSyncedPricing(rows)
+  },
+  clearSyncedPricing(): void {
+    repo.clearSyncedPricing()
+  },
+
   // ── MCP 服务器(设置 › 连接 › MCP) ──
   /**
    * 顺序按 id,没有语义 —— 但要稳定。理由在 `repo.listMcpServers`。
@@ -431,6 +447,28 @@ export const store = {
   getHistory(sessionId: string): readonly AgentMessage[] {
     return repo.getHistory(sessionId)
   },
+  /** 只取最后一条助手消息 —— 子代理交差正文,不必解析整段子转录 */
+  lastAssistantMessage(sessionId: string): AgentMessage | undefined {
+    return repo.lastAssistantMessage(sessionId)
+  },
+  /** 输入框补全:用户亲手发的最近几条 / 最后一条给人看的回复 / 本工作区的历史指令 */
+  recentSessionPrompts(sessionId: string, limit: number): AgentMessage[] {
+    return repo.recentSessionPrompts(sessionId, limit)
+  },
+  lastVisibleAssistantMessage(sessionId: string): AgentMessage | undefined {
+    return repo.lastVisibleAssistantMessage(sessionId)
+  },
+  recentWorkspacePrompts(workspaceId: string): string[] {
+    return repo.recentWorkspacePrompts(workspaceId)
+  },
+  /** 最后一条带目标标记的助手消息 —— 目标重载恢复只看它,不解析整段转录 */
+  lastGoalStatusMessage(sessionId: string): AgentMessage | undefined {
+    return repo.lastGoalStatusMessage(sessionId)
+  },
+  /** 一条消息仍是读出来时那一份时才换 parts(见 `repo.replaceMessagePartsIfUnchanged`) */
+  replaceMessagePartsIfUnchanged(sessionId: string, messageId: string, expectedParts: string, parts: AgentMessage['parts']): boolean {
+    return repo.replaceMessagePartsIfUnchanged(sessionId, messageId, expectedParts, parts)
+  },
   setHistory(sessionId: string, messages: readonly AgentMessage[]): void {
     const existing = repo.getSession(sessionId)
     if (existing === undefined) {
@@ -465,6 +503,26 @@ export const store = {
   getSessionDetail(sessionId: string): SessionDetail | undefined {
     return repo.getSessionDetail(sessionId)
   },
+  /** 会话元数据 + 消息条数,不读任何消息正文 */
+  getSessionSummary(sessionId: string): { session: Session; messageCount: number } | undefined {
+    const session = repo.getSession(sessionId)
+    return session === undefined ? undefined : { session, messageCount: repo.countMessages(sessionId) }
+  },
+  /** 转录的一页(见 `SessionPage`)。`messageRuns` 只覆盖本页的消息 */
+  getSessionPage(sessionId: string, limit: number, beforeMessageId?: string): SessionPage | undefined {
+    const session = repo.getSession(sessionId)
+    if (session === undefined) return undefined
+    const { messages, hasMore } = repo.getHistoryPage(sessionId, limit, beforeMessageId)
+    const messageRuns = repo.messageRunsOf(sessionId, messages.map((message) => message.id))
+    return {
+      session,
+      messages,
+      hasMore,
+      messageRuns,
+      runUsage: repo.runUsageOf(sessionId),
+      runModel: repo.runModelOf(sessionId)
+    }
+  },
   getSessionRunUsage(sessionId: string): ReturnType<typeof repo.runUsageOf> {
     return repo.runUsageOf(sessionId)
   },
@@ -489,6 +547,9 @@ export const store = {
   setSessionFavorited(sessionId: string, favorited: boolean): void {
     repo.setSessionFavorited(sessionId, favorited)
   },
+  sessionSubtreeIds(sessionId: string): string[] {
+    return repo.sessionSubtreeIds(sessionId)
+  },
   deleteSession(sessionId: string): string[] {
     // 未发出的输入、以及派生出来的子代理转录,都由 `repo.deleteSession` 一起收 ——
     // 它是整棵子树遍历的那一层,级联必须和遍历在同一处(见那边的注释)。
@@ -502,6 +563,18 @@ export const store = {
   },
   commitMessage(sessionId: string, message: AgentMessage, runId?: string): void {
     repo.commitMessage(sessionId, message, runId)
+  },
+  /**
+   * 给定的 messageId 里哪些**已经提交过**(消费回执,schema 第 34 条)。
+   *
+   * ★ 纯转发 —— SQL 仍然只在 `db/repo.ts`(见本文件头:全应用没有第二个地方
+   *   摸持久化)。回执的写入是同层 `commitMessage` 顺手做掉的,不需要单独入口。
+   *
+   * ★ 这**不是**网络授权 API:调用者仍须自己验证会话归属(谁的 run 在服务哪条
+   *   会话),这一层只回答「库里记没记过」。
+   */
+  committedInputIds(sessionId: string, ids: readonly string[]): string[] {
+    return repo.committedInputIds(sessionId, ids)
   },
   setRunRecord(id: string, sessionId: string, status: string, startedAt: number, endedAt?: number): void {
     repo.setRunRecord(id, sessionId, status, startedAt, endedAt)

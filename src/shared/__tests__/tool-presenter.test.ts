@@ -319,6 +319,8 @@ describe('注册表完整性', () => {
     'Skill',
     'web_search',
     'Task',
+    // 工作流(实验)—— `workflow` 形态,详情区是画布
+    'Workflow',
     'AskUserQuestion',
     'ProposeGoal',
     'ExitPlanMode',
@@ -330,10 +332,16 @@ describe('注册表完整性', () => {
     // 是 `widget` 形态 —— 后者是**内置专用**的形态,见 `ToolShape` 上那段说明。
     'visualize_read_me',
     'visualize_show_widget',
+    'visualize_edit_widget',
+    'visualize_update_widget',
     // 对话内生图 —— `image` 形态(专属图片卡),行的主语是 prompt 片段
     'generate_image',
     // 把对话里的图写进工作区 —— `mutate` 形态,行的主语是目标文件
     'SaveImage',
+    // 对话内生视频 —— `video` 形态(异步任务卡 + 播放器),行的主语是 prompt 片段
+    'generate_video',
+    // 把对话里的视频写进工作区 —— `mutate` 形态,同 SaveImage
+    'SaveVideo',
     /*
       浏览器那一族(16 个 `browser_*`)。★ 整族此前**一个都没登记**,于是每一行
       都落进 `humanize(internalId)` 的可读名兜底 —— 中文界面上一列 `browser click` /

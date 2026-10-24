@@ -10,10 +10,25 @@
  * - `emitToAll`   只接受 GlobalEventChannel(设置、主题、工作区列表这类真·全局变更)
  * 想拿 emitToAll 推 agent:event,编译期就过不去。
  */
-import { BrowserWindow } from 'electron'
-import type { WebContents } from 'electron'
+import type { BrowserWindow, WebContents } from 'electron'
 import type { EventChannel, IpcEventMap } from '../../shared/ipc/contract'
 import type { WindowKind } from '../../shared/domain/tab'
+
+/**
+ * 窗口后端:注册表需要向 Electron 问两件事(焦点窗口、webContents 对应的窗口)。
+ *
+ * ★ 由**桌面入口**在启动时注入,而不是在这里 `import { BrowserWindow } from 'electron'`:
+ *   那是值导入,会把 Electron 拖进每个只想广播一条全局事件的模块 —— 包括无头设备服务里复用的
+ *   IPC 逻辑。没有后端(服务、测试)时窗口表本来就是空的,广播是空操作,这两个查询答「没有」。
+ */
+export interface WindowBackend {
+  getFocusedWindow(): BrowserWindow | null
+  fromWebContents(contents: WebContents): BrowserWindow | null
+}
+let windowBackend: WindowBackend | null = null
+export function installWindowBackend(backend: WindowBackend | null): void {
+  windowBackend = backend
+}
 
 /**
  * 必须定向推送的频道:一个窗口只该收到它自己在看的那个 run / 终端,
@@ -21,7 +36,7 @@ import type { WindowKind } from '../../shared/domain/tab'
  * ⌥Space 快捷窗的还原按钮不该跟着换字形)。
  */
 export type TargetedEventChannel =
-  'agent:event' | 'terminal:data' | 'terminal:exit' | 'window:maximized' | 'connection:auth' | 'documentEngine:changed'
+  'agent:event' | 'terminal:data' | 'terminal:exit' | 'window:maximized' | 'window:visibility' | 'connection:auth' | 'documentEngine:changed'
 /** 真·全局状态变更,所有窗口都该知道 */
 export type GlobalEventChannel = Exclude<EventChannel, TargetedEventChannel>
 
@@ -127,7 +142,7 @@ class WindowRegistry {
    * 主窗。返回 `undefined` = 没有任何窗口报过,调用方自己决定怎么兜底。
    */
   activeWorkspaceOfFocused(): string | undefined {
-    const focused = BrowserWindow.getFocusedWindow()
+    const focused = windowBackend?.getFocusedWindow() ?? null
     if (focused !== null) {
       const reported = this.activeWorkspace.get(focused.webContents.id)
       if (reported !== undefined) return reported
@@ -157,6 +172,26 @@ class WindowRegistry {
     if (!set) return
     set.delete(sender.id)
     if (set.size === 0) this.topics.delete(topic)
+  }
+
+  /** 这个主题从此不会再有事件(run 已被回收):所有窗口的订阅一起摘掉,主题表不随 run 数增长 */
+  dropTopic(topic: string): void {
+    this.topics.delete(topic)
+  }
+
+  /**
+   * 这个窗口不再看任何 run 的正文(最小化 / 隐藏)。
+   *
+   * ★ 只摘 run 主题,终端主题不动:终端流本来就只在终端 Tab 挂着时订阅,而它的
+   * 回滚缓冲由主进程封顶;摘掉的话恢复可见时终端会缺一段输出,且没有补齐路径。
+   * run 正文有 —— 窗口回来时按快照 + 历史重建(渲染层 `startAgentEventPump`)。
+   */
+  unsubscribeRuns(sender: WebContents): void {
+    for (const [topic, ids] of this.topics) {
+      if (!topic.startsWith('run:')) continue
+      ids.delete(sender.id)
+      if (ids.size === 0) this.topics.delete(topic)
+    }
   }
 
   /**
@@ -293,7 +328,7 @@ class WindowRegistry {
       const { sender } = context
       if (sender.isDestroyed()) continue
       if (kind !== undefined && context.kind !== kind) continue
-      const win = BrowserWindow.fromWebContents(sender)
+      const win = windowBackend?.fromWebContents(sender) ?? null
       if (win !== null && !win.isDestroyed()) found.push(win)
     }
     return found

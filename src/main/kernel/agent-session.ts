@@ -35,6 +35,8 @@ import type { SchedulingBridge } from '../../shared/domain/scheduled'
 import type { ShellBridge } from '../../shared/domain/shell'
 import type { ImageGenBridge } from './image-gen'
 import type { SessionImageStore } from './session-images'
+import type { VideoGenBridge } from './video-gen'
+import type { SessionVideoStore } from './session-videos'
 import type { PlanExecutionContext } from './plan-execution'
 import { fileReferenceMatches, type FileReferenceSource } from '../../shared/domain/attachment'
 import { EnvironmentError } from '../../shared/domain/environment'
@@ -161,12 +163,29 @@ export interface SessionDeps {
    * `/images/generations` 请求全部留在 `main/kernel/image-gen.ts`。内核零 electron、可单测。
    */
   imageGen?: ImageGenBridge
+  /** 设置 › 实验 的现读口。见 `ToolContext.experimentalEnabled` */
+  experimentalEnabled?: ToolContext['experimentalEnabled']
+  /** 见 `ToolContext.subagentModels` */
+  subagentModels?: ToolContext['subagentModels']
   /**
    * 本会话的图片仓(生成图 → `ncw://` 会话附件;地址 → 字节)。缺省 = 纯内核测试,
    * 生成图留在内联 data URL、`SaveImage` 不下发。形状与理由同 `imageGen`,
    * 见 `kernel/session-images.ts` 文件头。
    */
   sessionImages?: SessionImageStore
+  /**
+   * 视频生成的后台通道。缺省 = 这个环境里生不了视频,`generate_video` 不下发。
+   *
+   * ★ 与 `imageGen` 的形状差别就是整个模块的核心:视频是**异步**的,
+   * 所以桥上有 `submit` / `status` / `cancel` 三个动词,而不是一个
+   * "提交并等结果"(见 `video-gen.ts` 的文件头)。
+   */
+  videoGen?: VideoGenBridge
+  /**
+   * 本会话的视频仓:\`SaveVideo\` 按 \`ncw://\` 地址读回字节。
+   * 缺省 = 纯内核测试没装配,`SaveVideo` 不下发。
+   */
+  sessionVideos?: SessionVideoStore
   /**
    * 回合末的一次询问 —— 「这一轮真的可以停了吗」。
    *
@@ -617,6 +636,9 @@ export class AgentSession {
       webSearch: this.req.webSearch,
       reminder: {
         ...(this.deps.planExecution !== undefined ? { planExecution: this.deps.planExecution } : {}),
+        ...(this.req.widgetContext !== undefined && this.req.widgetContext.length > 0
+          ? { widgetContext: this.req.widgetContext }
+          : {}),
         ...(planFile !== undefined ? { planFile } : {}),
         ...(this.deps.projectInstructions !== undefined
           ? { projectInstructions: this.deps.projectInstructions }
@@ -1320,7 +1342,11 @@ export class AgentSession {
       ...(this.deps.scheduling === undefined ? {} : { scheduling: this.deps.scheduling }),
       ...(this.deps.shells === undefined ? {} : { shells: this.deps.shells }),
       ...(this.deps.imageGen === undefined ? {} : { imageGen: this.deps.imageGen }),
-      ...(this.deps.sessionImages === undefined ? {} : { sessionImages: this.deps.sessionImages })
+      ...(this.deps.experimentalEnabled === undefined ? {} : { experimentalEnabled: this.deps.experimentalEnabled }),
+      ...(this.deps.subagentModels === undefined ? {} : { subagentModels: this.deps.subagentModels }),
+      ...(this.deps.sessionImages === undefined ? {} : { sessionImages: this.deps.sessionImages }),
+      ...(this.deps.videoGen === undefined ? {} : { videoGen: this.deps.videoGen }),
+      ...(this.deps.sessionVideos === undefined ? {} : { sessionVideos: this.deps.sessionVideos })
     }
   }
 

@@ -34,6 +34,7 @@ import { setConfigCategoryDirty } from './db/repo'
 import { runs } from './kernel/run-registry'
 import { browserManager } from './browser/manager'
 import { terminalHost } from './terminal-host'
+import { listResolvedModels } from './state/model-bindings'
 import { store } from './state/store'
 import { windows } from './window/registry'
 import {
@@ -100,7 +101,7 @@ export async function prepareAccountSwitch(accountId: string | null): Promise<vo
       ★ 这里**故意**抛错而不是等它跑完。等 = 一次登录被一个长跑任务挂住,
       而用户看到的是「登录按钮没反应」;抛 = 一句能读的错误,他停下来再登一次。
     */
-    if (runs.activeRunIds().length > 0) throw new ConfigSyncError('busy')
+    if (runs.activeRunIds().length > 0 || runs.hasSessionOperations()) throw new ConfigSyncError('busy')
 
     /*
       需求:文档会话必须在**切库之前**排空 —— 落在这一点上有两件事,缺一不可:
@@ -219,7 +220,7 @@ export function startSyncForAccount(accountId: string | null): void {
  */
 export async function importLocalConfigIntoCurrentAccount(): Promise<void> {
   if (switchInFlight) throw new ConfigSyncError('busy')
-  if (runs.activeRunIds().length > 0) throw new ConfigSyncError('busy')
+  if (runs.activeRunIds().length > 0 || runs.hasSessionOperations()) throw new ConfigSyncError('busy')
   switchInFlight = true
   try {
     importLocalConfigProfile()
@@ -240,7 +241,7 @@ export async function importLocalConfigIntoCurrentAccount(): Promise<void> {
  */
 function broadcastScopeChanged(): void {
   windows.emitToAll('settings:changed', store.getSettings())
-  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: store.listAliases() })
+  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: listResolvedModels() })
   windows.emitToAll('modelCatalog:changed', { custom: store.listUserModelCatalog() })
   windows.emitToAll('workspace:changed', { workspaces: store.listWorkspaces() })
   // `reset` 而不是某个工作区:侧边栏与内层 Tab 全部重来。

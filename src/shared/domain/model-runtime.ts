@@ -6,6 +6,7 @@ import {
   type ThinkingLevel
 } from '../agent/run-request'
 import type { ModelAlias, ModelCapabilities, ReasoningEffort, ThinkingConfig } from './provider'
+import { adaptiveAnthropicBinding } from './model-catalog-inventory/vendors/anthropic'
 
 export type ModelReasoningEffort = NonNullable<ThinkingConfig['defaultEffort']>
 
@@ -26,16 +27,26 @@ export interface ResolvedModelThinking {
 const MIN_THINKING_BUDGET = 1024
 const MIN_OUTPUT_HEADROOM = 1024
 
-type ThinkingModel = Pick<ModelAlias, 'thinkingConfig' | 'reasoningEfforts' | 'capabilities'>
+type ThinkingModel = Pick<ModelAlias, 'thinkingConfig' | 'reasoningEfforts' | 'capabilities'> &
+  Partial<Pick<ModelAlias, 'upstreamModel' | 'runtimeProtocol' | 'protocolOverride' | 'requestAdapter'>>
+
+/** Read-only thinking declaration matching the wire adapter, including legacy budgets. */
+export function effectiveModelThinking(model: ThinkingModel): Pick<ModelAlias, 'thinkingConfig' | 'reasoningEfforts'> {
+  return adaptiveAnthropicBinding(
+    model.upstreamModel ?? '', model.thinkingConfig,
+    model.runtimeProtocol ?? model.protocolOverride, model.requestAdapter?.preset, model.reasoningEfforts
+  ) ?? model
+}
 
 /** UI choices describe the selected binding, including provider overrides. */
 export function modelThinkingLevels(model: ThinkingModel | undefined): readonly ThinkingLevel[] {
   if (model === undefined) return ['auto']
-  const mode = model.thinkingConfig?.mode
+  const effective = effectiveModelThinking(model)
+  const mode = effective.thinkingConfig?.mode
   if (mode === 'unsupported' || mode === 'always') return ['auto']
   if (mode === 'toggle') return ['auto', 'medium', 'off'] // medium is the legacy enabled value; UI labels it On.
   if (mode === 'effort') {
-    const efforts = model.reasoningEfforts
+    const efforts = effective.reasoningEfforts
     if (efforts === undefined) return THINKING_LEVELS
     return THINKING_LEVELS.filter((level) => level === 'auto' || efforts.includes(
       level === 'off' ? 'none' : level === 'higher' ? 'xhigh' : level
@@ -83,6 +94,19 @@ export function auxiliaryThinkingLevel(wanted: ThinkingLevel, model: ThinkingMod
   // 一个都不比它弱(模型最低档也比要的强)时取最低的那一档 —— 宁可多想一点,也不能让请求失败。
   const picked = weaker.length > 0 ? weaker[weaker.length - 1] : available[0]
   return picked?.level ?? 'auto'
+}
+
+/**
+ * 这个模型的一次旁路请求能不能**完全不思考**:要么能关(`'off'` 可用),要么它根本不支持思考。
+ *
+ * 需求:输入框补全只要一行字,输出预算按「不思考」定(几十个 token)。关不掉思考的模型
+ * (`always`、effort 轴上没有 `'none'` 的)会先把预算花在推理上,回来的是空答案 ——
+ * 调用方据此要么放宽预算,要么干脆不发。
+ */
+export function canDisableThinking(model: ThinkingModel | undefined): boolean {
+  if (model === undefined) return false
+  return auxiliaryThinkingLevel('off', model) === 'off'
+    || effectiveModelThinking(model).thinkingConfig?.mode === 'unsupported'
 }
 
 function effortFor(level: ThinkingLevel, fallback: ModelReasoningEffort): ModelReasoningEffort {

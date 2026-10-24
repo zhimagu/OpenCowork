@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { localEnvironment } from '../../environment/local'
 import { isAbortError } from '../abort'
 import { nodeHost } from '../host'
-import { agentShell, nodeSpawn, quoteShellArg, shellCommandArgs, shellDialect } from '../node-spawn'
+import { agentShell, nodeSpawn, quoteShellArg, shellCommandArgs, shellDialect, terminalShellArgs } from '../node-spawn'
 
 vi.mock('node-pty', () => ({ spawn: vi.fn() }))
 
@@ -197,6 +197,46 @@ describe.skipIf(process.platform === 'win32')('spawn 超时', () => {
   })
 })
 
+describe.skipIf(process.platform === 'win32')('spawn 转后台', () => {
+  it('★ detach 后立刻返回已有输出,进程原样交出且超时不再生效', async () => {
+    const detach = new AbortController()
+    const p = spawn('echo early; sleep 0.6; echo late', { ...opts({ timeoutMs: 300 }), detach: detach.signal })
+    await new Promise((r) => setTimeout(r, 150))
+    detach.abort()
+    const r = await p
+    expect(r.detached).toBeDefined()
+    expect(r.stdout).toContain('early')
+    // 交出去的管道继续出数据;超时 300ms 已经卸掉,进程能活到自己退出
+    let tail = ''
+    r.detached!.stdout.on('data', (chunk: Buffer) => { tail += chunk.toString('utf8') })
+    // 交出来的流是 pause 过的:接手方负责 resume(见 node-spawn 的 onDetach)
+    r.detached!.stdout.resume()
+    r.detached!.stderr.resume()
+    const exit = await r.detached!.exited
+    expect(exit.code).toBe(0)
+    expect(tail).toContain('late')
+  })
+
+  it('交出去的进程 kill 时带走整棵树', async () => {
+    const pidFile = join(root, 'detach.pid')
+    const detach = new AbortController()
+    const p = spawn(`sleep 30 & echo $! > ${pidFile}; wait`, { ...opts(), detach: detach.signal })
+    const pid = await waitPidFile(pidFile)
+    detach.abort()
+    const r = await p
+    r.detached!.kill()
+    await expect(waitGone(pid)).resolves.toBe(true)
+  })
+
+  it('已经跑完的命令不会被 detach 改写成「转走了」', async () => {
+    const detach = new AbortController()
+    const r = await spawn('echo done', { ...opts(), detach: detach.signal })
+    detach.abort()
+    expect(r.detached).toBeUndefined()
+    expect(r.code).toBe(0)
+  })
+})
+
 describe.skipIf(process.platform === 'win32')('spawn 中断', () => {
   it('★ 中断**抛出** AbortError,不返回一个普通结果', async () => {
     const ac = new AbortController()
@@ -253,6 +293,19 @@ describe.skipIf(process.platform === 'win32')('spawn 的输出预算', () => {
  * 事实型提示词一旦是假的,比不写更糟 —— 模型不会怀疑它,只会照着
  * 那个不存在的 shell 写语法,然后拿到一条毫无头绪的语法错误。
  */
+describe('terminalShellArgs', () => {
+  it('POSIX 上以登录 shell 起交互终端,才能读到 ~/.zprofile 里的 PATH(#178)', () => {
+    expect(terminalShellArgs('/bin/zsh', 'darwin')).toEqual(['-l'])
+    expect(terminalShellArgs('/usr/local/bin/bash', 'linux')).toEqual(['-l'])
+    expect(terminalShellArgs('/opt/homebrew/bin/fish', 'darwin')).toEqual(['-l'])
+  })
+
+  it('Windows 与不认识的 shell 不加参数', () => {
+    expect(terminalShellArgs('powershell.exe', 'win32')).toEqual([])
+    expect(terminalShellArgs('/usr/bin/nu', 'linux')).toEqual([])
+  })
+})
+
 describe('agentShell', () => {
   it('★ nodeHost().platform.shell 和 spawn 真用的 shell 是同一个', () => {
     expect(nodeHost().platform.shell).toBe(agentShell())
@@ -383,8 +436,9 @@ describe('本地 Shell 配置生效范围', () => {
     await after.openTerminal({ cwd: root, cols: 80, rows: 24 })
     expect(before.terminalShell).toBe('sh')
     expect(after.terminalShell).toBe('bash')
-    expect(terminalSpawn).toHaveBeenNthCalledWith(1, 'sh', [], expect.objectContaining({ cwd: root }))
-    expect(terminalSpawn).toHaveBeenNthCalledWith(2, 'bash', [], expect.objectContaining({ cwd: root }))
+    const login = process.platform === 'win32' ? [] : ['-l']
+    expect(terminalSpawn).toHaveBeenNthCalledWith(1, 'sh', login, expect.objectContaining({ cwd: root }))
+    expect(terminalSpawn).toHaveBeenNthCalledWith(2, 'bash', login, expect.objectContaining({ cwd: root }))
     expect(terminalSpawn).toHaveBeenCalledTimes(2)
   })
 

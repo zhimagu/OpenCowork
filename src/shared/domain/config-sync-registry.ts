@@ -5,12 +5,24 @@ import type { SyncCategory } from './config-sync'
 /** Exhaustive compile-time inventory: new domain fields require an explicit sync decision. */
 export const PROVIDER_SYNC_FIELDS: Record<keyof UpstreamProvider, 'copy' | 'local'> = {
   id: 'copy', name: 'copy', protocol: 'copy', baseUrl: 'copy', credentialRef: 'local',
-  priority: 'copy', enabled: 'copy', protocolOptions: 'copy'
+  priority: 'copy', enabled: 'copy', protocolOptions: 'copy',
+  /*
+    ★ 视频连接配置跟着供应商一起同步:它描述的是"这家怎么出网"(adapter +
+    video base URL + 地域 / S3 桶),和聊天那份 baseUrl 同类 —— 两台机器上
+    应当指向同一家。**凭据仍在 `credentialRef` 指的本地密文槽里**,不跟着走。
+    ★ 它必须显式登记而不是靠"默认 copy":`Record<keyof …>` 是编译期清单,
+      漏一个字段在这里就编译不过 —— 那条约束正是为了让这个决定被当面做出。
+  */
+  videoGeneration: 'copy'
 }
-export const MODEL_SYNC_FIELDS: Record<keyof ModelAlias, 'copy'> = {
+// Effective protocol is recomputed on reads; only persisted model fields are portable.
+export const MODEL_SYNC_FIELDS: Record<Exclude<keyof ModelAlias, 'runtimeProtocol'>, 'copy'> = {
   alias: 'copy', providerId: 'copy', upstreamModel: 'copy', protocolOverride: 'copy', priority: 'copy',
   capabilities: 'copy', contextWindow: 'copy', maxOutputTokens: 'copy', displayName: 'copy', modality: 'copy',
-  enabled: 'copy', thinkingConfig: 'copy', reasoningEfforts: 'copy', requestAdapter: 'copy', source: 'copy', catalogOverrides: 'copy'
+  enabled: 'copy', thinkingConfig: 'copy', reasoningEfforts: 'copy', requestAdapter: 'copy', source: 'copy',
+  // 视频档案引用也是"这条绑定怎么发",和 protocolOverride 同类,跟着模型走。
+  video: 'copy',
+  catalogOverrides: 'copy'
 }
 export const SETTINGS_SYNC_FIELDS: Record<keyof AppSettings, SyncCategory | 'device' | 'split'> = {
   theme: 'preferences', activeThemeProfileId: 'preferences', locale: 'preferences', colorTheme: 'preferences',
@@ -22,13 +34,24 @@ export const SETTINGS_SYNC_FIELDS: Record<keyof AppSettings, SyncCategory | 'dev
   //   那会把一个别名搬到另一台机器上,而那台机器未必有这家供应商。档位跟着模型归同一档,
   //   拆开会出现「模型同步过去了、档位没有」的半套配置。
   compactModel: 'providers', compactModelProviderId: 'providers', compactThinking: 'providers',
+  // 输入框补全的两个模型同样是「某家供应商的别名」;各自的开关跟着模型归同一档
+  //(同上面压缩模型那段的理由)。本地补全不碰任何模型,是纯粹的用户偏好。
+  promptSuggestions: 'providers', completionModel: 'providers', completionModelProviderId: 'providers',
+  inlineCompletion: 'providers', inlineCompletionModel: 'providers', inlineCompletionModelProviderId: 'providers',
+  localCompletion: 'preferences',
   defaultModel: 'providers', defaultModelProviderId: 'providers',
   // 生图模型同样是「某家供应商的别名」——和 defaultModel 同档同理由。
   imageModel: 'providers', imageModelProviderId: 'providers',
   // 生图开关跟着生图模型走同一档:拆开会出现「模型同步过去了、开关没有」的半套配置
   //(同上面压缩模型那段的理由)。
   imageGenerationEnabled: 'providers',
-  contextManagement: 'preferences', subagent: 'split', gateway: 'device', notifications: 'preferences',
+  // 视频那三项与生图同档同理由:模型是"某家供应商的别名",开关跟着它走,
+  // 拆开会出现「模型同步过去了、开关没有」的半套配置。
+  videoModel: 'providers', videoModelProviderId: 'providers', videoGenerationEnabled: 'providers',
+  contextManagement: 'preferences',
+  // 「我要不要用实验功能」是用户的偏好,不是这台机器的事实 —— 同 contextManagement
+  experimental: 'preferences',
+  subagent: 'split', gateway: 'device', notifications: 'preferences',
   proxy: 'device', data: 'split', personalization: 'preferences', shortcuts: 'preferences', themeStudio: 'preferences',
   shell: 'device',
   // 自建 SearxNG 实例多半是 `http://localhost:8080` —— 同步到另一台机器上就是个死地址,

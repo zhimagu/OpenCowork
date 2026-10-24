@@ -19,7 +19,9 @@ import { sshZh, sshEn } from './ssh';
 import { workspaceZh, workspaceEn } from './workspace';
 import { extensionsZh, extensionsEn } from './extensions';
 import { gitZh, gitEn } from './git';
+import { diffZh, diffEn } from './diff';
 import { compactionZh, compactionEn } from './compaction';
+import { composerCompletionZh, composerCompletionEn } from './composer-completion';
 import { usageZh, usageEn } from './usage';
 import { providerAccountsZh, providerAccountsEn } from './provider-accounts';
 import { searchZh, searchEn } from './search';
@@ -30,13 +32,17 @@ import { pluginSkillsZh, pluginSkillsEn } from './plugin-skills';
 import { chatNavigationZh, chatNavigationEn } from './chat-navigation';
 import { thinkingStatsZh, thinkingStatsEn } from './thinking-stats';
 import { widgetZh, widgetEn } from './widget';
+import { workflowZh, workflowEn } from './workflow';
+import { experimentalZh, experimentalEn } from './experimental';
 import { migrationZh, migrationEn } from './migration';
 import { accountMenuZh, accountMenuEn } from './account-menu';
 import { rewardsZh, rewardsEn } from './rewards';
 import { walletZh, walletEn } from './wallet';
 import { pluginUiZh, pluginUiEn } from './plugin-ui';
 import { imageGenZh, imageGenEn } from './image-gen';
+import { videoGenZh, videoGenEn } from './video-gen';
 import { skillifyZh, skillifyEn } from './skillify';
+import { deviceZh, deviceEn } from './device';
 import {
   pluginMessages,
   pluginMessagesVersion,
@@ -58,6 +64,7 @@ export type Messages = Record<string, MessageValue>;
  * translated here.
  */
 const ZH: Messages = {
+  ...deviceZh,
   ...sshZh,
   ...workspaceZh,
   ...goalZh,
@@ -65,9 +72,12 @@ const ZH: Messages = {
   ...pluginSkillsZh,
   ...extensionsZh,
   ...gitZh,
+  ...diffZh,
   ...compactionZh,
+  ...composerCompletionZh,
   ...skillifyZh,
   ...imageGenZh,
+  ...videoGenZh,
   ...pluginUiZh,
   ...usageZh,
   ...providerAccountsZh,
@@ -76,6 +86,8 @@ const ZH: Messages = {
   ...chatNavigationZh,
   ...thinkingStatsZh,
   ...widgetZh,
+  ...workflowZh,
+  ...experimentalZh,
   ...migrationZh,
   ...themesZh,
   ...agentZh,
@@ -88,6 +100,12 @@ const ZH: Messages = {
   ...rewardsZh,
   ...walletZh,
   "app.handshakeFailed": "首屏握手失败：{error}",
+  // 首屏刷盘失败(Bootstrap.persistenceWarning)与会话输入落盘的状态。
+  // ★ 三句都**不带原因**:底层错误的正文里有绝对路径和库文件名,而这三条是要
+  //   显示在界面上的(toast 的正文)。
+  "app.persistenceWarning": "部分草稿或布局尚未保存。请检查磁盘空间和写入权限后重试。",
+  "session.inputPersistence.retrying": "会话输入尚未保存，正在重试。",
+  "session.inputPersistence.blocked": "会话输入保存失败，请检查存储后重试。",
   "auth.tagline": "把重复的交给它，时间留给你",
   "auth.login": "登录",
   "auth.openingBrowser": "正在打开浏览器…",
@@ -270,7 +288,7 @@ const ZH: Messages = {
   "skills.searchPlaceholder": "搜索 Skill…",
   "commands.groupLabel": "命令",
   "commands.skillsGroupLabel": "Skill",
-  "commands.builtin.init": "深入分析项目并生成 AGENTS.md",
+  "commands.builtin.init": "深入分析项目，生成 AGENTS.md、仓库地图与仓库记忆",
   "skills.all": "全部",
   "skills.global": "全局",
   "skills.project": "当前工作区",
@@ -309,6 +327,12 @@ const ZH: Messages = {
   "skills.networkFailed": "市场服务暂时不可用，请稍后重试。",
   "skills.digestMismatch": "下载包摘要校验失败，已拒绝安装。",
   "skills.packageTooLarge": "下载的 Skill 包超过大小限制。",
+  "skills.diskPermission": "没有写入 Skill 目录的权限，请检查文件夹权限后重试。",
+  "skills.diskFull": "磁盘空间不足，无法安装 Skill。",
+  "skills.zipInvalid": "Skill 压缩包格式不合法（路径、目录结构或文件数量不符合要求）。",
+  "skills.skillMdInvalid": "SKILL.md 无效：请检查 name、description 和正文是否完整。",
+  "skills.noVersion": "市场上这个 Skill 暂无可安装的版本。",
+  "skills.notLoaded": "Skill 已写入但未能加载，请到「本地诊断」查看原因。",
   "plugins.authRequired": "请先登录 Zhimagu CoWork 账户后再安装插件。",
   "plugins.scopeRequired": "当前授权不包含插件安装权限，请退出登录后重新授权。",
   "plugins.versionUnavailable": "这个插件版本已不可用，请刷新市场。",
@@ -429,6 +453,8 @@ const ZH: Messages = {
   // Task 的参数还在流、子代理还没派出去的那几秒（见 SubagentNode 的 pending）
   "chat.subagent.status.pending": "准备中",
   "chat.subagent.detail.errorUnknown": "未提供错误详情",
+  "chat.subagent.detail.errors": ({ count }) => `${count} 次失败`,
+  "chat.subagent.detail.empty": "还没有可展示的进度。",
   "chat.subagent.error.noOutput": ({ agent }) => `子代理 ${agent} 结束时没有产出任何文字。请使用更具体的任务说明重试，或直接完成此步骤。`,
   "chat.subagent.mode.background": "后台",
   "chat.subagent.phase.starting": "启动中",
@@ -454,9 +480,6 @@ const ZH: Messages = {
   "chat.subagent.report.partialLegacy": "这条记录来自旧版本,只存下了开头的一段。",
   // ★ 这个面板现在同时列前台和后台子代理(角标数的是「此刻有几个在跑」),
   //   所以标题不能再写「后台任务」—— 那样列表里的前台任务就成了自相矛盾的一行
-  "chat.subagent.center.title": "子代理任务",
-  "chat.subagent.center.open": "打开子代理任务",
-  "chat.subagent.center.count": ({ count }) => `${count} 个任务`,
   "chat.subagent.open": "在右侧打开完整记录",
   // ★ 终态下这一格问的不是「它在干嘛」,而是「它停在哪一步」—— `subagent_end` 曾经
   //   把 phase 硬写成「收尾中」,于是每一张终态卡片都说收尾中,这一栏等于零信息
@@ -466,6 +489,7 @@ const ZH: Messages = {
   "chat.subagent.notice.retry": ({ attempt }) => `重试 ${attempt}`,
   "chat.subagent.notice.switch": ({ to }) => `已切到 ${to}`,
   "chat.subagent.stop": "停止子代理",
+  "chat.subagent.toBackground": "转为后台运行",
   "chat.status.generating": "生成中",
   "chat.status.done": "已完成",
   "chat.status.error": "出错",
@@ -634,8 +658,9 @@ const ZH: Messages = {
   // 压缩失败时从主进程带上来的 messageKey(见 kernel/compaction/compact.ts)
   "chat.compaction.nothingToCompact": "这段对话还没有可压缩的内容",
   "chat.compaction.emptySummary": "模型没有写出摘要，这次压缩已取消",
+  // ★ 描述给用户看,不写「方案 §4.9」这类只有本仓库看得懂的引用
   "general.perSessionSubagentsHint":
-    "一段对话里最多同时运行几个子代理（方案 §4.9）。超出的排队等空位，不会失败。",
+    "一段对话里最多同时运行几个子代理。超出的排队等空位，不会失败。",
   "general.globalSubagentsHint":
     "全应用同时运行的子代理数上限，超出的排队等待。0 = 不允许派子代理。",
   "general.subagentRoleDesc.general-purpose": "通用助手：搜代码、处理多步任务",
@@ -752,6 +777,25 @@ const ZH: Messages = {
     `还没有配置任何上游供应商。内置了 ${count} 家预设，点上面的加号先看看有哪些。`,
   "models.browseProviders": "先看看有哪些。",
   "models.addModel": "添加模型",
+  "models.syncButton": "从 models.dev 同步模型",
+  "models.syncTitle": "从 models.dev 同步模型",
+  "models.syncDesc": "发现 {count} 个目录中还没有的模型。只新增,不会改动内置模型;models.dev 是聚合源,新增项标记为「聚合参考」。",
+  "models.syncFetching": "正在从 models.dev 拉取…",
+  "models.syncNone": "没有新模型,目录已包含 models.dev 中这些厂商的全部文本模型。",
+  "models.syncApply": "添加所选 ({count})",
+  "models.syncSelectAll": "全选",
+  "models.syncClearAll": "清空",
+  "models.syncDescWithUpdates": "新增 {added} 个目录中还没有的模型,另有 {updated} 个已有模型与 models.dev 不一致。更新只改下列有差异的字段,默认都不勾选;models.dev 是聚合源,请核对后再采用。",
+  "models.syncSectionUpdates": "可更新 ({count})",
+  "models.syncSectionAdded": "新增 ({count})",
+  "models.syncBuiltinBadge": "内置",
+  "models.syncCustomBadge": "自定义",
+  "models.syncField.contextWindow": "上下文窗口",
+  "models.syncField.maxOutputTokens": "最大输出",
+  "models.syncField.reasoningEfforts": "推理档位",
+  "models.syncYes": "支持",
+  "models.syncNo": "不支持",
+  "models.syncUnset": "未设置",
   "models.import": "导入模型",
   "models.cannotSelect": "无法选择该模型。",
   "models.fetching": ({ provider }) => `正在从 ${provider} 拉取模型列表`,
@@ -959,6 +1003,20 @@ const ZH: Messages = {
   "models.pricingUnknownHint":
     "从用量记录里取费用为空的那些。模型名抄错了的话，唯一的外显就是费用列永远显示「—」，这里是把它变得看得见的入口。",
   "models.pricingStep": "未接：pricing:upsert",
+  "models.pricingSyncTitle": "同步基础定价",
+  "models.pricingSyncHint": "从 models.dev 拉取 Anthropic / OpenAI / Google / xAI 的价格,对比后由你逐条确认。models.dev 是聚合源,不是官方价目表,变更项默认不勾选。",
+  "models.pricingSyncButton": "从 models.dev 同步",
+  "models.pricingSyncing": "正在同步…",
+  "models.pricingSyncedCount": "已采用 {count} 条同步价",
+  "models.pricingSyncClear": "清除同步价",
+  "models.pricingSyncDialogTitle": "同步定价预览",
+  "models.pricingSyncDialogDesc": "共解析 {total} 个模型,{count} 项与当前价不同或为新增。",
+  "models.pricingSyncNone": "没有差异,当前价目已与 models.dev 一致。",
+  "models.pricingSyncNew": "新增",
+  "models.pricingSyncChanged": "变更",
+  "models.pricingSyncApply": "采用所选 ({count})",
+  "models.pricingSyncCurrent": "当前",
+  "models.pricingSyncIncoming": "同步",
   "models.usageLogsStep": "未接：usage:getRequestLogs",
   "models.pricingNoMatch": "没有匹配的模型",
   "models.pricingNoMatchHint": ({ query, count }) =>
@@ -1558,6 +1616,9 @@ const ZH: Messages = {
   "data.frequency.manual": "手动",
   "data.frequency.daily": "每天",
   "data.frequency.weekly": "每周",
+  "data.age.7d": "7 天前",
+  "data.age.15d": "15 天前",
+  "data.age.1": "1 个月前",
   "data.age.3": "3 个月前",
   "data.age.6": "6 个月前",
   "data.age.12": "1 年前",
@@ -1601,6 +1662,11 @@ const ZH: Messages = {
   "data.cloudSyncErrorConflict": "本机与云端配置同时发生了变化，请处理冲突。",
   "data.cloudSyncErrorStorage": "加密同步空间暂时不可用或已达容量限制。",
   "data.cloudSyncErrorLocked": "请先输入同步密码解锁。",
+  "data.cloudSyncErrorSignedOut": "登录已失效，请重新登录 Zhimagu CoWork 账户后再试。",
+  "data.cloudSyncErrorInvalidData": "同步服务拒绝了这次请求，数据校验未通过。请更新到最新版本后重试。",
+  "data.cloudSyncErrorAccountChanged": "账户已切换，本次同步操作已取消。",
+  "data.cloudSyncErrorBusy": "正在处理其他操作，请稍后重试。",
+  "data.cloudSyncErrorUnknown": "同步失败，请稍后重试。",
   "data.cloudSyncReview": "首次同步预览",
   'data.cloudSyncReviewHint':
     '请确认要合并当前设备和云端的基础配置。会话、附件和本地路径不会同步。',
@@ -2033,6 +2099,8 @@ const ZH: Messages = {
   // 只停这一条命令，不是停整轮（见 `shell:stopToolCall`）。措辞必须和 Composer 上
   // 那颗「停止」区分得开，否则用户会以为它把整段回复也停掉了。
   "chat.tool.stop": "停止这条命令",
+  // 不杀命令，只是不再等它（见 `shell:backgroundToolCall`）
+  "chat.tool.background": "转为后台运行",
   // 工具行里文件名的 tooltip。路径是领域值，原样插进来（§6.5 不翻译领域值）
   "chat.tool.openFile": "打开 {path}",
   "chat.tool.running": "执行中",
@@ -2049,6 +2117,7 @@ const ZH: Messages = {
 };
 
 const EN: Messages = {
+  ...deviceEn,
   ...sshEn,
   ...workspaceEn,
   ...goalEn,
@@ -2056,9 +2125,12 @@ const EN: Messages = {
   ...pluginSkillsEn,
   ...extensionsEn,
   ...gitEn,
+  ...diffEn,
   ...compactionEn,
+  ...composerCompletionEn,
   ...skillifyEn,
   ...imageGenEn,
+  ...videoGenEn,
   ...pluginUiEn,
   ...themesEn,
   ...agentEn,
@@ -2074,11 +2146,16 @@ const EN: Messages = {
   ...chatNavigationEn,
   ...thinkingStatsEn,
   ...widgetEn,
+  ...workflowEn,
+  ...experimentalEn,
   ...migrationEn,
   ...accountMenuEn,
   ...rewardsEn,
   ...walletEn,
   "app.handshakeFailed": "Initial handshake failed: {error}",
+  "app.persistenceWarning": "Some drafts or layout could not be saved. Check disk space and write permissions, then try again.",
+  "session.inputPersistence.retrying": "Session input is not saved yet; retrying.",
+  "session.inputPersistence.blocked": "Session input could not be saved. Check your storage and try again.",
   "auth.tagline": "Hand off the repetitive work, keep the time",
   "auth.login": "Sign in",
   "auth.openingBrowser": "Opening browser…",
@@ -2259,7 +2336,7 @@ const EN: Messages = {
   "skills.searchPlaceholder": "Search Skills…",
   "commands.groupLabel": "Commands",
   "commands.skillsGroupLabel": "Skills",
-  "commands.builtin.init": "Analyze the project in depth and generate AGENTS.md",
+  "commands.builtin.init": "Analyze the project in depth and generate AGENTS.md, a code map and repository memory",
   "skills.all": "All",
   "skills.global": "Global",
   "skills.project": "Current workspace",
@@ -2298,6 +2375,12 @@ const EN: Messages = {
   "skills.networkFailed": "The marketplace is temporarily unavailable. Try again later.",
   "skills.digestMismatch": "The downloaded package failed its digest check and was not installed.",
   "skills.packageTooLarge": "The downloaded Skill package exceeds the size limit.",
+  "skills.diskPermission": "No permission to write to the Skills folder. Check folder permissions and try again.",
+  "skills.diskFull": "Not enough disk space to install this Skill.",
+  "skills.zipInvalid": "The Skill archive is invalid (bad paths, folder layout, or file count).",
+  "skills.skillMdInvalid": "SKILL.md is invalid. Check that name, description and body are complete.",
+  "skills.noVersion": "This Skill has no installable version in the marketplace.",
+  "skills.notLoaded": "The Skill was written but failed to load. See Local diagnostics for details.",
   "plugins.authRequired": "Sign in to your Zhimagu CoWork account before installing a plugin.",
   "plugins.scopeRequired": "Your authorization does not include plugin installation. Sign out and re-authorize to continue.",
   "plugins.versionUnavailable": "This plugin version is no longer available. Refresh the marketplace.",
@@ -2421,6 +2504,8 @@ const EN: Messages = {
   "chat.subagent.status.aborted": "Stopped",
   "chat.subagent.status.pending": "Preparing",
   "chat.subagent.detail.errorUnknown": "No error details were provided",
+  "chat.subagent.detail.errors": ({ count }) => `${count} failed`,
+  "chat.subagent.detail.empty": "No progress to show yet.",
   "chat.subagent.error.noOutput": ({ agent }) => `The subagent ${agent} finished without producing any text. Retry with a more specific prompt, or do this step yourself.`,
   "chat.subagent.mode.background": "Background",
   "chat.subagent.phase.starting": "Starting",
@@ -2441,13 +2526,11 @@ const EN: Messages = {
   "chat.subagent.report.loading": "Loading the full result…",
   "chat.subagent.report.partialFailed": "The full result could not be loaded; this is only the opening. Open the full record to read it.",
   "chat.subagent.report.partialLegacy": "This record predates full-result storage; only the opening was kept.",
-  "chat.subagent.center.title": "Subagent tasks",
-  "chat.subagent.center.open": "Open subagent tasks",
-  "chat.subagent.center.count": ({ count }) => `${count} tasks`,
   "chat.subagent.open": "Open the full record on the right",
   "chat.subagent.notice.retry": ({ attempt }) => `Retry ${attempt}`,
   "chat.subagent.notice.switch": ({ to }) => `Switched to ${to}`,
   "chat.subagent.stop": "Stop subagent",
+  "chat.subagent.toBackground": "Move to background",
   "chat.status.generating": "Generating",
   "chat.status.done": "Done",
   "chat.status.error": "Error",
@@ -2618,7 +2701,7 @@ const EN: Messages = {
   "chat.compaction.nothingToCompact": "There is nothing to compact yet",
   "chat.compaction.emptySummary": "The model returned no summary; this compaction was cancelled",
   "general.perSessionSubagentsHint":
-    "How many subagents one conversation may have running at the same time (plan §4.9). Dispatches beyond that wait in a queue instead of failing.",
+    "How many subagents one conversation may have running at the same time. Dispatches beyond that wait in a queue instead of failing.",
   "general.globalSubagentsHint":
     "How many subagents may run at the same time across the whole app; the rest queue up. 0 disables subagent dispatch.",
   "general.subagentRoleDesc.general-purpose": "General helper: code search, multi-step tasks",
@@ -2738,6 +2821,25 @@ const EN: Messages = {
     `No upstream providers configured. ${count} presets are available; use the plus button to browse them.`,
   "models.browseProviders": "Browse the presets.",
   "models.addModel": "Add model",
+  "models.syncButton": "Sync models from models.dev",
+  "models.syncTitle": "Sync models from models.dev",
+  "models.syncDesc": "{count} models not in the catalogue yet. Add-only; built-in models are never changed. models.dev is an aggregator, so new rows are marked as aggregator reference.",
+  "models.syncFetching": "Fetching from models.dev…",
+  "models.syncNone": "Nothing new. The catalogue already has every text model models.dev lists for these vendors.",
+  "models.syncApply": "Add selected ({count})",
+  "models.syncSelectAll": "Select all",
+  "models.syncClearAll": "Clear",
+  "models.syncDescWithUpdates": "{added} new models not in the catalogue, and {updated} existing models differ from models.dev. Updates change only the fields listed and are unchecked by default; models.dev is an aggregator, so review before applying.",
+  "models.syncSectionUpdates": "Updates ({count})",
+  "models.syncSectionAdded": "New ({count})",
+  "models.syncBuiltinBadge": "Built-in",
+  "models.syncCustomBadge": "Custom",
+  "models.syncField.contextWindow": "Context window",
+  "models.syncField.maxOutputTokens": "Max output",
+  "models.syncField.reasoningEfforts": "Reasoning efforts",
+  "models.syncYes": "Yes",
+  "models.syncNo": "No",
+  "models.syncUnset": "Not set",
   "models.import": "Import models",
   "models.cannotSelect": "This model cannot be selected.",
   "models.fetching": ({ provider }) => `Fetching models from ${provider}`,
@@ -2955,6 +3057,20 @@ const EN: Messages = {
   "models.pricingUnknownHint":
     "Models whose usage records have no cost. A mistyped model name otherwise only shows up as “—” forever in the cost column; this is where it becomes visible.",
   "models.pricingStep": "Not connected: pricing:upsert",
+  "models.pricingSyncTitle": "Sync base pricing",
+  "models.pricingSyncHint": "Fetch Anthropic / OpenAI / Google / xAI prices from models.dev and confirm each difference. models.dev is an aggregator, not an official price list, so changed rows are unchecked by default.",
+  "models.pricingSyncButton": "Sync from models.dev",
+  "models.pricingSyncing": "Syncing…",
+  "models.pricingSyncedCount": "{count} synced prices in use",
+  "models.pricingSyncClear": "Clear synced prices",
+  "models.pricingSyncDialogTitle": "Pricing sync preview",
+  "models.pricingSyncDialogDesc": "Parsed {total} models; {count} are new or differ from the current price.",
+  "models.pricingSyncNone": "No differences. Current prices match models.dev.",
+  "models.pricingSyncNew": "New",
+  "models.pricingSyncChanged": "Changed",
+  "models.pricingSyncApply": "Apply selected ({count})",
+  "models.pricingSyncCurrent": "Current",
+  "models.pricingSyncIncoming": "Synced",
   "models.usageLogsStep": "Not connected: usage:getRequestLogs",
   "models.pricingNoMatch": "No matching models",
   "models.pricingNoMatchHint": ({ query, count }) =>
@@ -3560,6 +3676,9 @@ const EN: Messages = {
   "data.frequency.manual": "Manual",
   "data.frequency.daily": "Daily",
   "data.frequency.weekly": "Weekly",
+  "data.age.7d": "Older than 7 days",
+  "data.age.15d": "Older than 15 days",
+  "data.age.1": "Older than 1 month",
   "data.age.3": "Older than 3 months",
   "data.age.6": "Older than 6 months",
   "data.age.12": "Older than 1 year",
@@ -3604,6 +3723,11 @@ const EN: Messages = {
   "data.cloudSyncErrorConflict": "Local and cloud configuration changed at the same time. Resolve the conflict to continue.",
   "data.cloudSyncErrorStorage": "The encrypted sync space is unavailable or has reached its storage limit.",
   "data.cloudSyncErrorLocked": "Enter your sync password to unlock sync.",
+  "data.cloudSyncErrorSignedOut": "Your session has expired. Sign in to your Zhimagu CoWork account again and retry.",
+  "data.cloudSyncErrorInvalidData": "The sync service rejected the request because the data failed validation. Update to the latest version and retry.",
+  "data.cloudSyncErrorAccountChanged": "The account changed, so this sync operation was cancelled.",
+  "data.cloudSyncErrorBusy": "Another operation is in progress. Try again shortly.",
+  "data.cloudSyncErrorUnknown": "Sync failed. Try again later.",
   "data.cloudSyncReview": "Review first sync",
   'data.cloudSyncReviewHint':
     "Confirm whether to merge this device's basic settings with the cloud. Sessions, attachments, and local paths are never synced.",
@@ -4058,6 +4182,7 @@ const EN: Messages = {
   "chat.tool.runningStatus": "Running",
   "chat.tool.waitingStatus": "Waiting",
   "chat.tool.stop": "Stop this command",
+  "chat.tool.background": "Move to background",
   "chat.tool.openFile": "Open {path}",
   "chat.tool.running": "Running",
   "chat.tool.failed": "Failed",

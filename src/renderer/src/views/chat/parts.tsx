@@ -10,7 +10,7 @@
  * 这个文件只负责把 presenter 的输出摆进版式里。新增一个工具的展示规则
  * 不需要动这里一行。
  */
-import { Bot, Brain, CheckCircle2, CircleAlert, Clock3, ListChecks, Square } from "lucide-react";
+import { ArrowDownToLine, Bot, Brain, CheckCircle2, CircleAlert, Clock3, ListChecks, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { formatCallDuration } from "../../../../shared/agent/duration";
 import { elapsedOf, formatDuration } from "../../../../shared/agent/duration";
@@ -40,11 +40,11 @@ import { useWorkspaceFile } from "./workspace-file";
 import { previewOf } from "./interaction-preview";
 import { MAX_PARTIAL_JSON_CHARS, parsePartialJson } from "./partial-json";
 import { ToolIcon, type ToolViewStatus } from "./ToolIcon";
-import { abortRun } from "../../services/agent";
-import { getSession } from "../../services/sessions";
+import { abortRun, backgroundSubagent } from "../../services/agent";
+import { getLastAssistantMessage } from "../../services/sessions";
 import { visibleText } from "../../../../shared/agent/message";
 import { useOpenSubagent } from "./subagent-open";
-import { useStopToolCall } from "./tool-stop";
+import { useBackgroundToolCall, useStopToolCall } from "./tool-stop";
 import { AgentShimmerText } from "./AgentActivity";
 
 /**
@@ -301,6 +301,16 @@ export function ToolCallCard({
   const stop = stopToolCall === undefined || stoppableCallId === undefined
     ? undefined
     : (): void => { stopToolCall(stoppableCallId) };
+  /*
+    需求:跑得比预想久的前台命令(构建、长测试)可以**让它接着跑、但别再等它**。
+    ★ 判据是这一次调用自己报的 `detachable`(主进程只在环境真能收编时才报),
+      不是工具名 —— SSH 上的 Bash 转不了,画出来就是一颗按了没反应的按钮。
+  */
+  const backgroundToolCall = useBackgroundToolCall();
+  const detachableCallId = call?.detachable === true && status === "running" ? call.callId : undefined;
+  const background = backgroundToolCall === undefined || detachableCallId === undefined
+    ? undefined
+    : (): void => { backgroundToolCall(detachableCallId) };
 
   /*
     需求:图标要按目标文件的扩展名选(`.tsx` → 蓝色 TS 图标),所以行内容得先算出来。
@@ -313,13 +323,61 @@ export function ToolCallCard({
     需求:编辑/写入这一行右端直接给出 `+7 −1`,不展开就知道这次动了多大。
     数字来自 presenter(见 `ToolLineStats`),算不准的情况它自己返回 undefined。
   */
-  const lineStats = presenter.stats?.(shownInput, call?.output);
+  // ★ Edit 的统计要对新旧两段跑一次行级 LCS。卡片在流式期间每帧都会重渲,
+  // 入参没变就不该重算。
+  const output = call?.output;
+  const lineStats = useMemo(() => presenter.stats?.(shownInput, output), [presenter, shownInput, output]);
   /*
     需求:点文件名直接打开那个文件。
     ★ 没有工作区入口(只读的子代理面板)时传 undefined —— 行会把文件名画成纯文本,
     而不是一枚点了没反应的链接。
   */
   const { open: openPath } = useWorkspaceFile();
+
+  /*
+    需求:工作流只显示画布,不要外面那一行工具标题。
+    ★ 那一行的标题/节点数/状态和画布自己的标题栏(标题 + 进度 + 全屏)完全重复,
+      叠在一起读起来是同一件事说了两遍。画布本身就是这一步的产物(pinned 形态),
+      也就没有「收起」的必要 —— 去掉行,连同它的展开开关一起去掉。
+  */
+  if (presenter.shape === "workflow") {
+    return (
+      <div data-testid="tool-call" data-tool-status={status} data-tool-shape={presenter.shape}>
+        <ToolDetail
+          shape={presenter.shape}
+          input={shownInput}
+          output={call?.output}
+          isError={status === "error"}
+          toolName={toolName}
+          callId={call?.callId}
+          workflow={call?.workflow}
+        />
+      </div>
+    );
+  }
+
+  /*
+    需求:widget 直接长在对话里 —— 没有卡片框、没有标题行,和正文同一块底。
+    ★ 那一行写的是「可视化 · <title>」,而图本身就在下面;叠一层框和一行字,读起来像是
+      「这里引用了一张图」而不是「这里就是那张图」。复制源码 / 重新渲染挪到图右上角的悬停按钮里。
+    ★ **失败例外**,仍然走下面的卡片:失败时没有图,只剩那句给模型也给人看的原因,
+      它需要那一行告诉用户这是哪个工具、失败在哪。
+  */
+  if (presenter.shape === "widget" && status !== "error") {
+    return (
+      <div data-testid="tool-call" data-tool-status={status} data-tool-shape={presenter.shape} className="my-1">
+        <ToolDetail
+          shape={presenter.shape}
+          input={shownInput}
+          output={call?.output}
+          isError={false}
+          toolName={toolName}
+          callId={call?.callId}
+          card={card}
+        />
+      </div>
+    );
+  }
 
   return (
     <Surface
@@ -360,18 +418,34 @@ export function ToolCallCard({
             <StatusSlot status={status} duration={duration} />
           </>
         }
-        actions={stop === undefined ? undefined : (
-          /* 停止按钮是行的**兄弟**,不是展开按钮的子节点 —— 按钮不能套按钮 */
-          <button
-            type="button"
-            data-testid="tool-stop"
-            onClick={stop}
-            aria-label={t("chat.tool.stop")}
-            title={t("chat.tool.stop")}
-            className="ml-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-danger transition-colors hover:bg-danger/10 motion-reduce:transition-none"
-          >
-            <Square size={10} />
-          </button>
+        actions={stop === undefined && background === undefined ? undefined : (
+          /* 动作按钮是行的**兄弟**,不是展开按钮的子节点 —— 按钮不能套按钮 */
+          <>
+            {background !== undefined && (
+              <button
+                type="button"
+                data-testid="tool-background"
+                onClick={background}
+                aria-label={t("chat.tool.background")}
+                title={t("chat.tool.background")}
+                className="ml-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-fg-muted transition-colors hover:bg-tint-hover hover:text-fg motion-reduce:transition-none"
+              >
+                <ArrowDownToLine size={12} />
+              </button>
+            )}
+            {stop !== undefined && (
+              <button
+                type="button"
+                data-testid="tool-stop"
+                onClick={stop}
+                aria-label={t("chat.tool.stop")}
+                title={t("chat.tool.stop")}
+                className="ml-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-danger transition-colors hover:bg-danger/10 motion-reduce:transition-none"
+              >
+                <Square size={10} />
+              </button>
+            )}
+          </>
         )}
       />
 
@@ -385,6 +459,7 @@ export function ToolCallCard({
           callId={call?.callId}
           card={card}
           partialImages={call?.partialImages}
+          workflow={call?.workflow}
         />
       </SurfaceReveal>
     </Surface>
@@ -436,18 +511,16 @@ function StatusSlot({
 }
 
 /**
- * 子代理卡片 —— **一张摘要,不是一个抽屉。**
+ * 子代理卡片 —— 点标题行**就地展开**,展开区里有进度、最近动作、结果摘要,
+ * 以及「完整记录」入口(在右侧工作区开一个只读会话,复用主智能体那套渲染)。
  *
- * ★ 它以前是个手风琴:点标题行展开,里面塞着详情网格、活动列表、错误框,
- * 以及**停止按钮**。那个形态是「跑了一个钟头没人看出它卡死了」的一半原因:
+ * ★ 这个形态以前拆过一次(改成「点一下直接开右侧面板」),理由是停止按钮藏在折叠里、
+ * 详情摊在对话流里。这次恢复展开,但**那两条理由仍然成立,所以保留它们的解法**:
  *
- * 1. **停止按钮藏在折叠里。** 想掐掉一个卡住的子代理,得先点开一张
- *    从外面完全看不出异常的卡片 —— 而会去点的人,首先得怀疑它有异常。
- * 2. **详情摊在对话流中间。** 一张展开的卡片能把转录顶掉半屏,于是没人愿意展开;
- *    可那几格(停在哪个阶段、距上次事件多久、工具数/错误数)恰恰是排查时唯一要看的。
- *
- * 现在整张卡片点一下,在**右侧工作区**开一个只读会话(复用主智能体那套渲染),
- * 详情搬进那边的身份栏;停止按钮提到标题行上 —— 不展开就能按。
+ * 1. 停止 / 转后台按钮仍然是标题行的兄弟,**不展开就能按**。
+ * 2. 展开区有高度上限(摘要区内部滚动),不会把转录顶掉半屏。
+ * 3. 「打开完整记录」是**独立的一颗按钮**,不再和展开抢同一次点击 ——
+ *    旧转录没有 `childSessionId` 时只是没有这颗按钮,卡片本身照样能展开。
  */
 export function SubagentNode({
   summary,
@@ -468,6 +541,7 @@ export function SubagentNode({
   const { t } = useI18n();
   const openSubagent = useOpenSubagent();
   const [now, setNow] = useState(() => Date.now());
+  const [open, setOpen] = useState(false);
   const running = state?.status === 'running';
 
   useEffect(() => {
@@ -527,6 +601,15 @@ export function SubagentNode({
     if (state?.childRunId !== undefined) void abortRun(state.childRunId, true)
   }
   /*
+    需求:前台子代理跑得比预想久时,让主代理先接着干别的 —— 子代理不停,
+    结论跑完后按后台那条路送回来。只对**还在跑的前台**子代理成立。
+    ★ 失败静默:false 只意味着它刚好跑完了,用户要的「别再等」已经成立。
+  */
+  const childRunId = state?.childRunId
+  const toBackground = running && !background && childRunId !== undefined
+    ? (): void => { void backgroundSubagent(childRunId).catch(() => {}) }
+    : undefined
+  /*
     ★ 没有 `childSessionId` 的是**旧转录**(那个字段是随这次改动才加进
     `subagent_start` 的)。它们点开会是一个空面板,所以这里索性不让点 ——
     一张点了没反应的卡片比一张不能点的卡片难解释得多。
@@ -546,11 +629,10 @@ export function SubagentNode({
       <div className="flex w-full min-w-0 items-center">
         <button
           type="button"
-          data-testid="subagent-open"
-          disabled={!canOpen}
-          title={canOpen ? t('chat.subagent.open') : undefined}
-          onClick={() => { if (state !== undefined) openSubagent?.(state) }}
-          className={cn(ROW_CLASS, "flex-1", canOpen && "cursor-pointer")}
+          data-testid="subagent-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className={cn(ROW_CLASS, "flex-1 cursor-pointer")}
         >
           {/*
             ★ 子代理的身份色原先画在**整张卡**上(描边 + 5% 底色 + 左侧内阴影)。
@@ -624,7 +706,31 @@ export function SubagentNode({
             </span>
             {duration !== undefined && <span className="font-mono text-[11.5px] text-fg-faint">{duration}</span>}
           </span>
+          <RowChevron open={open} />
         </button>
+        {canOpen && (
+          <button
+            type="button"
+            data-testid="subagent-open"
+            onClick={() => { if (state !== undefined) openSubagent?.(state) }}
+            title={t('chat.subagent.open')}
+            className="ml-1.5 shrink-0 rounded-[5px] px-1.5 py-0.5 text-[12px] text-accent transition-colors hover:bg-accent/10"
+          >
+            {t('chat.subagent.report.openRecord')}
+          </button>
+        )}
+        {toBackground !== undefined && (
+          <button
+            type="button"
+            data-testid="subagent-background"
+            onClick={toBackground}
+            aria-label={t('chat.subagent.toBackground')}
+            title={t('chat.subagent.toBackground')}
+            className="ml-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px] text-fg-muted transition-colors hover:bg-tint-hover hover:text-fg"
+          >
+            <ArrowDownToLine size={12} />
+          </button>
+        )}
         {running && (
           <button
             type="button"
@@ -638,6 +744,41 @@ export function SubagentNode({
           </button>
         )}
       </div>
+      <SurfaceReveal open={open} className="selectable">
+        <div data-testid="subagent-detail" className="space-y-1.5 text-[12px] text-fg-muted">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            {state?.phase !== undefined && (
+              <span>{t(`chat.subagent.phase.${state.phase}` as 'chat.subagent.phase.starting')}</span>
+            )}
+            <span>{t('chat.subagent.activityCount', { count: state?.toolCalls ?? 0 })}</span>
+            {(state?.toolErrors ?? 0) > 0 && (
+              <span className="text-danger">{t('chat.subagent.detail.errors', { count: state?.toolErrors ?? 0 })}</span>
+            )}
+          </p>
+          {running && state?.currentTool !== undefined && (
+            <p className="truncate font-mono text-[11.5px] text-fg-faint">
+              {state.currentTool}{state.currentTarget === undefined ? '' : ` ${state.currentTarget}`}
+            </p>
+          )}
+          {(state?.activity?.length ?? 0) > 0 && (
+            <ul className="space-y-0.5">
+              {state?.activity?.slice(0, 5).map((entry, index) => (
+                <li key={`${entry.toolName}-${String(index)}`} className="truncate font-mono text-[11.5px] text-fg-faint">
+                  {entry.toolName}{entry.target === undefined ? '' : ` ${entry.target}`}
+                </li>
+              ))}
+            </ul>
+          )}
+          {state?.summary !== undefined && state.summary.trim() !== '' && (
+            <div className="scroll-thin max-h-[min(30vh,240px)] overflow-y-auto pr-1">
+              <AgentMarkdown content={state.summary} variant="compact" />
+            </div>
+          )}
+          {state === undefined && (
+            <p className="text-fg-faint">{t('chat.subagent.detail.empty')}</p>
+          )}
+        </div>
+      </SurfaceReveal>
       {noticeDetail !== undefined && (
         <SurfaceRow
           data-testid="subagent-notice"
@@ -722,11 +863,11 @@ export function SubagentReportRow({
     requested.current = childSessionId;
     let cancelled = false;
     setLoading(true);
-    void getSession(childSessionId)
-      .then((detail) => {
+    // 只取最后一条助手消息 —— 子代理交差的正文就是它,不为它读整段子转录
+    void getLastAssistantMessage(childSessionId)
+      .then((last) => {
         if (cancelled) return;
-        const last = [...detail.messages].reverse().find((m) => m.role === "assistant");
-        const body = last === undefined ? "" : visibleText(last).trim();
+        const body = last === null ? "" : visibleText(last).trim();
         if (body === "") setFailed(true);
         else setFull(body);
       })

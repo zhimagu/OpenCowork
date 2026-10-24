@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
@@ -17,43 +18,57 @@ import {
   writeTerminal
 } from '../../services/terminal'
 import type { InnerTab } from '../../../../shared/domain/tab'
-import { Button } from '../../components/ui/Button'
+import { Button } from '../../components/arc/button/button'
 import { useI18n } from '../../i18n'
 import { connectionErrorKey } from '../../services/connections'
+import { openExternal } from '../../services/app'
 
+// 苹果风格:配色取自 macOS「终端」的 Basic 描述文件 + 系统色(systemRed / systemGreen …)
 const LIGHT_THEME = {
-  background: '#faf9f5',
-  foreground: '#2d332f',
-  cursor: '#2d4739',
-  cursorAccent: '#faf9f5',
-  selectionBackground: '#d9e3dd',
-  black: '#202522',
-  red: '#b33f31',
-  green: '#2d6d4a',
-  yellow: '#8b6d2d',
-  blue: '#3b6895',
-  magenta: '#805b86',
-  cyan: '#2f7580',
-  white: '#f7f7f3',
-  brightBlack: '#69716c',
-  brightRed: '#c95846',
-  brightGreen: '#3e9163',
-  brightYellow: '#aa8841',
-  brightBlue: '#5d86b5',
-  brightMagenta: '#a278aa',
-  brightCyan: '#58a1a8',
+  background: '#ffffff',
+  foreground: '#1d1d1f',
+  cursor: '#0071e3',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#b3d7ff',
+  black: '#1d1d1f',
+  red: '#c41a16',
+  green: '#007400',
+  yellow: '#826b28',
+  blue: '#0b4f79',
+  magenta: '#9c2191',
+  cyan: '#3e8087',
+  white: '#e5e5ea',
+  brightBlack: '#6e6e73',
+  brightRed: '#ff3b30',
+  brightGreen: '#28a745',
+  brightYellow: '#b58900',
+  brightBlue: '#0071e3',
+  brightMagenta: '#af52de',
+  brightCyan: '#32ade6',
   brightWhite: '#ffffff'
 }
 
 const DARK_THEME = {
-  ...LIGHT_THEME,
-  background: '#1e2020',
-  foreground: '#ececec',
-  cursor: '#36d285',
-  cursorAccent: '#1e2020',
-  selectionBackground: '#3c5146',
-  black: '#111312',
-  white: '#e6e9e7',
+  background: '#1c1c1e',
+  foreground: '#f5f5f7',
+  cursor: '#0a84ff',
+  cursorAccent: '#1c1c1e',
+  selectionBackground: '#3f638b',
+  black: '#1c1c1e',
+  red: '#ff453a',
+  green: '#30d158',
+  yellow: '#ffd60a',
+  blue: '#0a84ff',
+  magenta: '#bf5af2',
+  cyan: '#64d2ff',
+  white: '#d1d1d6',
+  brightBlack: '#8e8e93',
+  brightRed: '#ff6961',
+  brightGreen: '#4ce07a',
+  brightYellow: '#ffe066',
+  brightBlue: '#409cff',
+  brightMagenta: '#da8fff',
+  brightCyan: '#8ae0ff',
   brightWhite: '#ffffff'
 }
 
@@ -89,6 +104,17 @@ export function TerminalView({ tab, workspace }: { tab: Extract<InnerTab, { kind
     })
     const fit = new FitAddon()
     terminal.loadAddon(fit)
+    /*
+      需求(#178):`npm run dev` 打出的本地预览地址要能 ⌘+点击(非 mac 为 Ctrl+点击)
+      跳系统浏览器,与 macOS「终端」/ VS Code 一致。必须带修饰键:裸点击会和
+      选中文本、全屏 TUI 的鼠标事件抢。
+    */
+    const isMac = navigator.platform.toLowerCase().includes('mac')
+    terminal.loadAddon(new WebLinksAddon((event, uri) => {
+      if (!(isMac ? event.metaKey : event.ctrlKey)) return
+      event.preventDefault()
+      void openExternal(uri).catch(() => {})
+    }))
     terminal.open(host)
     /*
       GPU 渲染。需求:xterm 6 的默认 DOM 渲染器逐字符改 DOM,而 codex / claude
@@ -253,14 +279,14 @@ export function TerminalView({ tab, workspace }: { tab: Extract<InnerTab, { kind
             <dt>{t('ssh.terminal.shell')}</dt><dd className="break-all font-mono">{intent.shell}</dd>
           </dl>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" variant="accent" icon={<ShieldCheck size={13} />} onClick={() => { void approve() }}>{t('ssh.terminal.allow')}</Button>
-            <Button size="sm" icon={<X size={13} />} onClick={decline}>{t('common.cancel')}</Button>
+            <Button type="button" size="sm" variant="primary" onClick={() => { void approve() }}><ShieldCheck size={13} />{t('ssh.terminal.allow')}</Button>
+            <Button type="button" size="sm" variant="secondary" onClick={decline}><X size={13} />{t('common.cancel')}</Button>
           </div>
         </div>
       )}
       {(status === 'error' || status === 'exited' || status === 'declined') && (
         <div className="shrink-0 border-b border-border px-3 py-2">
-          <Button size="sm" icon={<Play size={13} />} onClick={() => { void startRef.current?.() }}>{t(status === 'declined' ? 'ssh.terminal.request' : 'ssh.terminal.restart')}</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => { void startRef.current?.() }}><Play size={13} />{t(status === 'declined' ? 'ssh.terminal.request' : 'ssh.terminal.restart')}</Button>
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 py-2">

@@ -103,6 +103,26 @@ export type ToolShape =
    * 唯一证据,而 Agent 一大半的浏览器动作(text/click)的结果都是**它**。
    */
   | 'screenshot'
+  /**
+   * 对话内生成视频那一个(`generate_video`)。
+   *
+   * 需求:它展开后是一张**视频卡**:一张 `<video controls>` 加一条任务状态行。
+   * 原先归在 `network`,`NetworkDetail` 成功时只把 `output.content` 画成代码块、
+   * 完全不读 `output.videos` —— 表现为"模型说好了,卡片里只有一句英文回执"。
+   *
+   * ★ 与 `image` 分开:图片卡是"按格出图 + 提示词区",而视频卡的核心是
+   * **一条异步任务的生命周期**(排队/生成/下载/完成),那在图片上不存在。
+   */
+  | 'video'
+  /**
+   * 编排一张子代理依赖图的那一个(`Workflow`,实验功能)。
+   *
+   * 需求:它展开后是一张**画布**(`views/chat/WorkflowCanvas.tsx`):节点 + 依赖连线,
+   * 每个节点的状态实时变。归进 `orchestration` 的话会和 `Task` 一样画成一行摘要,
+   * 而「哪些在并行、谁在等谁」正是这张图要给人看的东西。
+   * ★ 不进过程折叠(见 `isPinnedShape`):图就是这一步的产物。
+   */
+  | 'workflow'
   | 'external'
 
 /**
@@ -214,13 +234,26 @@ export const PRESENTER_COPY_KEYS = [
     去掉下划线之后的短语,所以它**不翻译**(同模型名、文件名,见 AGENTS §6.5)。
   */
   'chat.tool.title.widget',
+  'chat.tool.title.widgetEdit',
+  'chat.tool.title.widgetUpdate',
   'chat.tool.title.readMe',
+  // 工作流(实验)。target 是模型写的 `title`,领域值,不翻译
+  'chat.tool.title.workflow',
   // 对话内生图。行的主语是模型收到的 prompt 片段(领域值,不翻译)
   'chat.tool.title.generateImage',
   // 改图那半:入参带了源图(`image`)就是它,否则是上面那个
   'chat.tool.title.editImage',
   // 把对话里的图写进工作区(SaveImage)。行的主语是目标文件,同 Write
   'chat.tool.title.saveImage',
+  /*
+    对话内生成视频。三个动作各有标签:提交/查询/取消 —— 行的主语是 prompt 片段
+    (提交)或什么都不给(查询/取消,因为它们的入参里只有 job_id,对人没有信息量)。
+  */
+  'chat.tool.title.generateVideo',
+  'chat.tool.title.checkVideo',
+  'chat.tool.title.cancelVideo',
+  // 把对话里的视频写进工作区(SaveVideo)。主语同 SaveImage,是目标文件
+  'chat.tool.title.saveVideo',
   /*
     浏览器那一族的动作标签(`browser_*`)。
     ★ 需求:这一族此前**全都**没登记,兜底路径把 internalId 的可读化结果直接画到行里
@@ -249,6 +282,7 @@ export const PRESENTER_COPY_KEYS = [
   // 折叠态右侧摘要
   'chat.tool.summary.lines',
   'chat.tool.summary.items',
+  'chat.tool.summary.nodes',
   'chat.tool.summary.files',
   'chat.tool.summary.matches',
   'chat.tool.summary.results',
@@ -832,6 +866,14 @@ const REGISTRY: Record<string, ToolPresenter> = {
       return t === '' ? undefined : t
     }
   },
+  Workflow: {
+    shape: 'workflow',
+    line: (i) => valueLine('chat.tool.title.workflow', clip(pick(i, 'title'), 40)),
+    summary: (i) => {
+      const nodes = (i as { nodes?: unknown } | null)?.nodes
+      return Array.isArray(nodes) ? presenterCopy('chat.tool.summary.nodes', { count: nodes.length }) : undefined
+    }
+  },
   Skill: {
     shape: 'orchestration',
     line: (i) => valueLine('chat.tool.title.skill', pick(i, 'name'))
@@ -903,6 +945,18 @@ const REGISTRY: Record<string, ToolPresenter> = {
     shape: 'widget',
     line: (i) => valueLine('chat.tool.title.widget', humanize(pick(i, 'title')))
   },
+  /*
+    改图与推数据。改图的产物是一张新 widget,形态同 show_widget;推数据没有自己的画面
+    (数据由同名那张图读),所以是一行普通的 `external`。
+  */
+  visualize_edit_widget: {
+    shape: 'widget',
+    line: (i) => valueLine('chat.tool.title.widgetEdit', humanize(pick(i, 'new_title') || pick(i, 'title')))
+  },
+  visualize_update_widget: {
+    shape: 'external',
+    line: (i) => valueLine('chat.tool.title.widgetUpdate', humanize(pick(i, 'title')))
+  },
   visualize_read_me: {
     shape: 'external',
     line: () => ({ label: presenterCopy('chat.tool.title.readMe') }),
@@ -918,6 +972,23 @@ const REGISTRY: Record<string, ToolPresenter> = {
     而 network 的渲染器画不出图。)
     ★ 不给 summary:张数与进度由卡片本身和进度 chip(`2/4`)说,再猜一个只会是噪声。
   */
+  generate_video: {
+    shape: 'video',
+    line: (i) =>
+      valueLine(
+        // 提交/查询/取消是三种动作,行标签跟着 action 走(缺省 = 生成)
+        pick(i, 'action') === 'status'
+          ? 'chat.tool.title.checkVideo'
+          : pick(i, 'action') === 'cancel'
+            ? 'chat.tool.title.cancelVideo'
+            : 'chat.tool.title.generateVideo',
+        clip(pick(i, 'prompt'), 48)
+      )
+  },
+  SaveVideo: {
+    shape: 'mutate',
+    line: (i) => fileLine('chat.tool.title.saveVideo', pick(i, 'file_path'))
+  },
   generate_image: {
     shape: 'image',
     line: (i) =>
@@ -1118,7 +1189,9 @@ const PINNED_SHAPES: Record<ToolShape, boolean> = {
   interaction: false,
   widget: false,
   image: true,
+  video: true,
   screenshot: true,
+  workflow: true,
   external: false
 }
 

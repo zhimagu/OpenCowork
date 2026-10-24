@@ -6,6 +6,7 @@ import {
   Image,
   Pencil,
   Plus,
+  RefreshCw,
   RotateCcw,
   Search,
   Trash2,
@@ -26,7 +27,7 @@ import {
   validateRequestPatches,
   type RequestPatchValidationCode,
 } from "../../../../../shared/domain/request-patch";
-import { PRICING_SEED } from "../../../../../shared/domain/pricing-seed";
+import { usePricingTable } from "../../../services/pricing";
 import {
   mergeModelCatalog,
   type ModelCatalogDefinition,
@@ -39,10 +40,11 @@ import {
   recommendCatalogMetadata,
   type ReasoningEffort,
 } from "../../../../../shared/domain/model-catalog-inventory";
-import { EmptyState } from "../../../components/ui/EmptyState";
+import { EmptyState } from "../../../components/arc/empty-state/empty-state";
 import { Dialog } from "../../../components/ui/Dialog";
+import { Select, type SelectOption } from "../../../components/ui/Select";
 import { TextInput } from "../../../components/ui/TextInput";
-import { Toggle } from "../../../components/ui/Toggle";
+import { Switch } from "../../../components/arc/switch/switch";
 import { cn } from "../../../lib/cn";
 import {
   listModels,
@@ -58,6 +60,7 @@ import {
 import { useModelsStore } from "../../../stores/models";
 import type { SettingsPageProps } from "../../props";
 import { ProviderCatalog } from "./ProviderCatalog";
+import { ModelCatalogSyncDialog } from "./ModelCatalogSyncDialog";
 import { StubModalityPage } from "./StubModalityPage";
 import { EnabledModelList } from "./EnabledModelList";
 import { ProviderPanel } from "./ProviderPanel";
@@ -69,12 +72,16 @@ import { parseModelTab } from "./tabs";
 import { useI18n, type TranslationKey } from "../../../i18n";
 import { ModelProtocolEditor, modelProtocolSummary } from "./ModelProtocol";
 import { ImageModelPage } from "./ImageModelPage";
+import { VideoModelPage } from "./VideoModelPage";
 
 export function ModelPage({ settings, sub, patch }: SettingsPageProps): ReactNode {
   const tab = parseModelTab(sub);
   if (tab === "management") return <ModelConsole />;
   // 图片页要 settings/patch:页脚那行「对话生图使用的模型」是全局设置(见 ImageGenModelRow)
   if (tab === "image") return <ImageModelPage settings={settings} patch={patch} />;
+  // 视频页同理 —— 它有自己的开关(`videoGenerationEnabled`)与点名模型(`videoModel`),
+  // 而两者的语义与生图那条**不同**(关掉只挡新建,见 settings.ts 上那段)。
+  if (tab === "video") return <VideoModelPage settings={settings} patch={patch} />;
   if (tab !== "text") return <StubModalityPage modality={tab} />;
   return <LegacyTextTab settings={settings} />;
 }
@@ -144,7 +151,7 @@ function LegacyTextTab({
           <EmptyState
             className="min-w-0 flex-1 py-16"
             title={t("models.noProvider")}
-            hint={t("models.addProviderHint")}
+            description={t("models.addProviderHint")}
           />
         )}
       </div>
@@ -226,6 +233,7 @@ function ModelConsole(): ReactNode {
     load = useModelsStore((s) => s.load);
   const [manufacturerId, setManufacturerId] = useState<string | null>(null),
     [selectedKey, setSelectedKey] = useState<string | null>(null),
+    [syncOpen, setSyncOpen] = useState(false),
     [editingModel, setEditingModel] = useState<CatalogEditorTarget | null>(
       null,
     ),
@@ -360,6 +368,7 @@ function ModelConsole(): ReactNode {
   };
   return (
     <>
+      <ModelCatalogSyncDialog open={syncOpen} onClose={() => setSyncOpen(false)} />
       <div className="flex min-h-[520px] min-w-0 gap-3">
         <aside className="flex max-h-[542px] w-[190px] shrink-0 flex-col border-r border-hairline pr-3">
           <div className="mb-2 flex items-center justify-between">
@@ -417,7 +426,7 @@ function ModelConsole(): ReactNode {
         </aside>
         <section className="min-w-0 flex-1">
           {catalogError !== null && (
-            <div className="mb-2 rounded-[7px] border border-danger/30 bg-danger/5 px-2.5 py-2 text-[11px] text-danger">
+            <div className="mb-2 rounded-[8px] border border-danger/30 bg-danger/5 px-2.5 py-2 text-[11px] text-danger">
               {t("chat.status.error")}: {catalogError}
             </div>
           )}
@@ -432,55 +441,59 @@ function ModelConsole(): ReactNode {
                 icon={<Search size={13} />}
               />
             </div>
-            <select
-              value={modalityFilter}
-              onChange={(e) => setModalityFilter(e.target.value)}
-              className="h-8 rounded-[7px] border border-border bg-surface-field px-2 text-[11.5px] text-fg"
+            <div className="w-[116px]">
+              <EditorSelect
+                value={modalityFilter}
+                ariaLabel={t("models.allTypes")}
+                onValueChange={setModalityFilter}
+                options={[
+                  { value: "all", label: t("models.allTypes") },
+                  { value: "text", label: t("models.text") },
+                  { value: "image", label: t("models.image") },
+                  { value: "video", label: t("models.video") },
+                  { value: "speech", label: t("models.speech") },
+                  { value: "transcription", label: t("models.transcription") },
+                ]}
+              />
+            </div>
+            <div className="w-[136px]">
+              <EditorSelect
+                value={capability}
+                ariaLabel={t("models.allCapabilities")}
+                onValueChange={setCapability}
+                options={[
+                  { value: "all", label: t("models.allCapabilities") },
+                  { value: "vision", label: t("models.capabilityVision") },
+                  { value: "file", label: t("models.capabilityFile") },
+                  { value: "video", label: t("models.capabilityVideo") },
+                  { value: "audio", label: t("models.capabilityAudioInput") },
+                  { value: "web", label: t("models.webSearch") },
+                  { value: "tools", label: t("models.capabilityTools") },
+                  { value: "think", label: t("models.reasoning") },
+                  { value: "image-output", label: t("models.imageGeneration") },
+                  { value: "video-output", label: t("models.capabilityVideoOutput") },
+                  { value: "audio-output", label: t("models.capabilityAudioOutput") },
+                  { value: "structured", label: t("models.capabilityStructuredOutput") },
+                  { value: "streaming", label: t("models.capabilityStreaming") },
+                  { value: "batch", label: t("models.capabilityBatch") },
+                  { value: "caching", label: t("models.capabilityCaching") },
+                ]}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setSyncOpen(true)}
+              className="inline-flex h-8 items-center gap-1 rounded-[8px] border border-border px-2.5 text-[11.5px] text-fg hover:bg-tint-hover"
             >
-              <option value="all">{t("models.allTypes")}</option>
-              <option value="text">{t("models.text")}</option>
-              <option value="image">{t("models.image")}</option>
-              <option value="video">{t("models.video")}</option>
-              <option value="speech">{t("models.speech")}</option>
-              <option value="transcription">{t("models.transcription")}</option>
-            </select>
-            <select
-              value={capability}
-              onChange={(e) => setCapability(e.target.value)}
-              className="h-8 rounded-[7px] border border-border bg-surface-field px-2 text-[11.5px] text-fg"
-            >
-              <option value="all">{t("models.allCapabilities")}</option>
-              <option value="vision">{t("models.capabilityVision")}</option>
-              <option value="file">{t("models.capabilityFile")}</option>
-              <option value="video">{t("models.capabilityVideo")}</option>
-              <option value="audio">{t("models.capabilityAudioInput")}</option>
-              <option value="web">{t("models.webSearch")}</option>
-              <option value="tools">{t("models.capabilityTools")}</option>
-              <option value="think">{t("models.reasoning")}</option>
-              <option value="image-output">
-                {t("models.imageGeneration")}
-              </option>
-              <option value="video-output">
-                {t("models.capabilityVideoOutput")}
-              </option>
-              <option value="audio-output">
-                {t("models.capabilityAudioOutput")}
-              </option>
-              <option value="structured">
-                {t("models.capabilityStructuredOutput")}
-              </option>
-              <option value="streaming">
-                {t("models.capabilityStreaming")}
-              </option>
-              <option value="batch">{t("models.capabilityBatch")}</option>
-              <option value="caching">{t("models.capabilityCaching")}</option>
-            </select>
+              <RefreshCw size={13} />
+              {t("models.syncButton")}
+            </button>
             <button
               type="button"
               onClick={() =>
                 setEditingModel({ model: blankCatalogModel(), isNew: true })
               }
-              className="inline-flex h-8 items-center gap-1 rounded-[7px] bg-accent px-2.5 text-[11.5px] text-accent-fg"
+              className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-accent px-2.5 text-[11.5px] text-accent-fg"
             >
               <Plus size={13} />
               {t("models.addModel")}
@@ -538,7 +551,7 @@ function ModelConsole(): ReactNode {
                 className="py-12"
                 icon={<Cpu size={20} />}
                 title={t("models.noMatch")}
-                hint={
+                description={
                   loaded && catalogLoaded
                     ? t("models.adjustFilters")
                     : t("models.readingCatalog")
@@ -602,6 +615,7 @@ function ModelRow({
   onEdit: () => void;
 }): ReactNode {
   const { t } = useI18n();
+  const pricingTable = usePricingTable();
   const caps = [
     (m.capabilities.vision || m.capabilities.visionInput) &&
       t("models.badgeVision"),
@@ -615,7 +629,7 @@ function ModelRow({
     m.capabilities.tools && t("models.badgeTools"),
     m.capabilities.thinking && t("models.badgeThink"),
   ].filter(Boolean) as string[];
-  const price = selectCatalogPricing(PRICING_SEED, m, Date.now());
+  const price = selectCatalogPricing(pricingTable, m, Date.now());
   const rate = price?.tiers[0]?.rate;
   const currency = price?.currency ?? "USD";
   const money = (value: number | undefined): string =>
@@ -768,8 +782,37 @@ function ModelRow({
   );
 }
 
+/** 检查器里的下拉：共享 `Select`（Radix），避免原生 select 露出系统控件样式。 */
+function EditorSelect({
+  value,
+  options,
+  onValueChange,
+  ariaLabel,
+  disabled = false,
+  className,
+}: {
+  value: string;
+  options: readonly SelectOption[];
+  onValueChange: (value: string) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+  className?: string;
+}): ReactNode {
+  return (
+    <Select
+      inModal
+      value={value}
+      options={options}
+      onValueChange={onValueChange}
+      ariaLabel={ariaLabel}
+      disabled={disabled}
+      className={cn("h-8", disabled && "opacity-60", className)}
+    />
+  );
+}
+
 const editorInputClass =
-  "h-8 w-full rounded-[7px] border border-border bg-surface-field px-2 text-[11.5px] text-fg outline-none focus:border-accent";
+  "apple-field h-8 w-full text-[12px]";
 
 function cloneCatalogDraft(model: ModelCatalogDefinition): CatalogDraft {
   return {
@@ -936,6 +979,11 @@ function CatalogModelEditor({
       (draft.thinkingConfig.defaultBudgetTokens !== undefined &&
         (!Number.isInteger(draft.thinkingConfig.defaultBudgetTokens) ||
           draft.thinkingConfig.defaultBudgetTokens < 0)) ||
+      (draft.thinkingConfig.anthropicAdaptive === true &&
+        draft.thinkingConfig.mode === "effort" &&
+        draft.thinkingConfig.parameterPath?.trim() === "output_config.effort" &&
+        !draft.thinkingConfig.defaultEnabled &&
+        !draft.reasoningEfforts?.includes("none")) ||
       (draft.thinkingConfig.mode === "effort" &&
         (draft.thinkingConfig.defaultEffort === undefined ||
           draft.reasoningEfforts === undefined ||
@@ -990,6 +1038,10 @@ function CatalogModelEditor({
       },
       thinkingConfig: {
         ...draft.thinkingConfig,
+        ...(draft.thinkingConfig.mode === "effort" &&
+        draft.thinkingConfig.parameterPath?.trim() === "output_config.effort"
+          ? {}
+          : { anthropicAdaptive: undefined }),
         ...(draft.thinkingConfig.defaultBudgetTokens === undefined
           ? {}
           : {
@@ -1152,7 +1204,7 @@ function CatalogModelEditor({
       )}
 
       {error !== null && (
-        <div className="rounded-[7px] border border-danger/30 bg-danger/5 px-2.5 py-2 text-[11px] text-danger">
+        <div className="rounded-[8px] border border-danger/30 bg-danger/5 px-2.5 py-2 text-[11px] text-danger">
           {t("chat.status.error")}: {error}
         </div>
       )}
@@ -1182,75 +1234,67 @@ function CatalogModelEditor({
             />
           </EditorField>
           <EditorField label={t("models.manufacturer")}>
-            <select
+            <EditorSelect
               value={draft.manufacturerId}
               disabled={builtin}
-              onChange={(event) => {
+              ariaLabel={t("models.manufacturer")}
+              options={MODEL_MANUFACTURERS.map((manufacturer) => ({
+                value: manufacturer.id,
+                label:
+                  manufacturer.id === "other"
+                    ? t("models.otherVendor")
+                    : manufacturer.label,
+              }))}
+              onValueChange={(value) => {
                 const manufacturer = MODEL_MANUFACTURERS.find(
-                  (item) => item.id === event.target.value,
+                  (item) => item.id === value,
                 );
                 setDraft((current) => ({
                   ...current,
-                  manufacturerId: event.target.value,
+                  manufacturerId: value,
                   manufacturerLabel:
                     manufacturer?.label ?? current.manufacturerLabel,
                 }));
               }}
-              className={cn(editorInputClass, builtin && "opacity-60")}
-            >
-              {MODEL_MANUFACTURERS.map((manufacturer) => (
-                <option key={manufacturer.id} value={manufacturer.id}>
-                  {manufacturer.id === "other"
-                    ? t("models.otherVendor")
-                    : manufacturer.label}
-                </option>
-              ))}
-            </select>
+            />
           </EditorField>
           <EditorField label={t("models.columns.type")}>
-            <select
+            <EditorSelect
               value={draft.modality}
-              onChange={(event) =>
+              ariaLabel={t("models.columns.type")}
+              options={[
+                { value: "text", label: t("models.text") },
+                { value: "image", label: t("models.image") },
+                { value: "video", label: t("models.video") },
+                { value: "speech", label: t("models.speech") },
+                { value: "transcription", label: t("models.transcription") },
+              ]}
+              onValueChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  modality: event.target.value as ModelModality,
+                  modality: value as ModelModality,
                 }))
               }
-              className={editorInputClass}
-            >
-              <option value="text">{t("models.text")}</option>
-              <option value="image">{t("models.image")}</option>
-              <option value="video">{t("models.video")}</option>
-              <option value="speech">{t("models.speech")}</option>
-              <option value="transcription">{t("models.transcription")}</option>
-            </select>
+            />
           </EditorField>
           <EditorField label={t("models.verificationStatus")}>
-            <select
+            <EditorSelect
               value={draft.verificationStatus ?? "unverified"}
               disabled={builtin}
-              onChange={(event) =>
+              ariaLabel={t("models.verificationStatus")}
+              options={[
+                { value: "official-api", label: t("models.verificationOfficialApi") },
+                { value: "official-model-card", label: t("models.verificationOfficialCard") },
+                { value: "aggregator-reference", label: t("models.verificationAggregator") },
+                { value: "unverified", label: t("models.verificationUnverified") },
+              ]}
+              onValueChange={(value) =>
                 setDraft((current) => ({
                   ...current,
-                  verificationStatus: event.target
-                    .value as ModelCatalogVerificationStatus,
+                  verificationStatus: value as ModelCatalogVerificationStatus,
                 }))
               }
-              className={cn(editorInputClass, builtin && "opacity-60")}
-            >
-              <option value="official-api">
-                {t("models.verificationOfficialApi")}
-              </option>
-              <option value="official-model-card">
-                {t("models.verificationOfficialCard")}
-              </option>
-              <option value="aggregator-reference">
-                {t("models.verificationAggregator")}
-              </option>
-              <option value="unverified">
-                {t("models.verificationUnverified")}
-              </option>
-            </select>
+            />
           </EditorField>
           <EditorField label={t("models.fieldContextWindow")}>
             <input
@@ -1395,10 +1439,18 @@ function CatalogModelEditor({
       <InspectorSection title={t("models.reasoning")}>
         <div className="grid grid-cols-2 gap-2.5">
           <EditorField label={t("models.reasoning")}>
-            <select
+            <EditorSelect
               value={thinking.mode}
-              onChange={(event) => {
-                const mode = event.target.value as ThinkingMode;
+              ariaLabel={t("models.reasoning")}
+              options={[
+                { value: "unsupported", label: t("models.unsupported") },
+                { value: "always", label: t("models.always") },
+                { value: "toggle", label: t("models.toggle") },
+                { value: "effort", label: t("models.effort") },
+                { value: "budget", label: t("models.budget") },
+              ]}
+              onValueChange={(value) => {
+                const mode = value as ThinkingMode;
                 setDraft((current) => ({
                   ...current,
                   capabilities: {
@@ -1426,14 +1478,7 @@ function CatalogModelEditor({
                     : {}),
                 }));
               }}
-              className={editorInputClass}
-            >
-              <option value="unsupported">{t("models.unsupported")}</option>
-              <option value="always">{t("models.always")}</option>
-              <option value="toggle">{t("models.toggle")}</option>
-              <option value="effort">{t("models.effort")}</option>
-              <option value="budget">{t("models.budget")}</option>
-            </select>
+            />
           </EditorField>
           <EditorField label={t("models.fieldParameterPath")}>
             <input
@@ -1464,13 +1509,13 @@ function CatalogModelEditor({
                 thinking.mode === "unsupported" || thinking.mode === "always"
               }
               className={cn(
-                "flex h-8 items-center justify-end rounded-[7px] border border-border bg-surface-field px-2",
+                "flex h-8 items-center justify-end rounded-[8px] border border-border bg-surface-field px-2",
                 (thinking.mode === "unsupported" ||
                   thinking.mode === "always") &&
                   "opacity-60",
               )}
             >
-              <Toggle
+              <Switch
                 checked={
                   thinking.mode === "unsupported"
                     ? false
@@ -1478,7 +1523,7 @@ function CatalogModelEditor({
                       ? true
                     : thinking.defaultEnabled
                 }
-                onChange={(value) => {
+                onCheckedChange={(value) => {
                   if (
                     thinking.mode === "unsupported" ||
                     thinking.mode === "always"
@@ -1492,19 +1537,26 @@ function CatalogModelEditor({
                     },
                   }));
                 }}
-                label={t("models.fieldDefaultEnabled")}
+                aria-label={t("models.fieldDefaultEnabled")}
               />
             </div>
           </EditorField>
           <EditorField label={t("models.fieldDefaultEffort")}>
-            <select
+            <EditorSelect
               value={thinking.defaultEffort ?? ""}
               disabled={thinking.mode !== "effort"}
-              onChange={(event) => {
+              ariaLabel={t("models.fieldDefaultEffort")}
+              options={[
+                { value: "", label: t("models.defaultOption") },
+                ...(efforts.length > 0 ? efforts : REASONING_EFFORTS).map(
+                  (effort) => ({ value: effort, label: effort }),
+                ),
+              ]}
+              onValueChange={(value) => {
                 const defaultEffort =
-                  event.target.value === ""
+                  value === ""
                     ? undefined
-                    : (event.target.value as ReasoningEffort);
+                    : (value as ReasoningEffort);
                 setDraft((current) => ({
                   ...current,
                   thinkingConfig: {
@@ -1522,20 +1574,7 @@ function CatalogModelEditor({
                       }),
                 }));
               }}
-              className={cn(
-                editorInputClass,
-                thinking.mode !== "effort" && "opacity-60",
-              )}
-            >
-              <option value="">{t("models.defaultOption")}</option>
-              {(efforts.length > 0 ? efforts : REASONING_EFFORTS).map(
-                (effort) => (
-                  <option key={effort} value={effort}>
-                    {effort}
-                  </option>
-                ),
-              )}
-            </select>
+            />
           </EditorField>
           <EditorField label={t("models.fieldDefaultBudgetTokens")}>
             <input
@@ -1615,31 +1654,32 @@ function CatalogModelEditor({
       </InspectorSection>
 
       <InspectorSection title={t("models.requestAdapter")}>
-        <select
+        <EditorSelect
           value={adapter.preset}
-          onChange={(event) =>
+          ariaLabel={t("models.requestAdapter")}
+          options={[
+            { value: "auto", label: t("models.autoDetect") },
+            { value: "anthropic", label: "Anthropic" },
+            { value: "openai-chat", label: "OpenAI Chat" },
+            { value: "openai-responses", label: "OpenAI Responses" },
+            { value: "custom", label: t("models.customPatch") },
+          ]}
+          onValueChange={(value) =>
             setDraft((current) => ({
               ...current,
               requestAdapter: {
-                preset: event.target.value as RequestAdapterConfig["preset"],
+                preset: value as RequestAdapterConfig["preset"],
                 patches: current.requestAdapter?.patches ?? [],
               },
             }))
           }
-          className={editorInputClass}
-        >
-          <option value="auto">{t("models.autoDetect")}</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="openai-chat">OpenAI Chat</option>
-          <option value="openai-responses">OpenAI Responses</option>
-          <option value="custom">{t("models.customPatch")}</option>
-        </select>
+        />
         <EditorField label="JSON Patch">
           <textarea
             value={patchText}
             onChange={(event) => setPatchText(event.target.value)}
             spellCheck={false}
-            className="selectable mt-2 min-h-[112px] w-full resize-y rounded-[7px] border border-border bg-surface-field p-2 font-mono text-[10.5px] text-fg outline-none focus:border-accent"
+            className="apple-field selectable mt-2 min-h-[112px] w-full resize-y rounded-[8px] border border-border bg-surface-field p-2 font-mono text-[10.5px] text-fg outline-none focus:border-fg-faint"
           />
         </EditorField>
         <p className="mt-1 text-[10.5px] leading-[1.45] text-fg-faint">
@@ -1694,22 +1734,22 @@ function CatalogModelEditor({
       {providers.length > 0 && (
         <InspectorSection title={t("models.saveToConnection")}>
           <div className="flex gap-2">
-            <select
-              value={bindingProviderId}
-              onChange={(event) => setBindingProviderId(event.target.value)}
-              className={cn(editorInputClass, "min-w-0 flex-1")}
-            >
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}
-                </option>
-              ))}
-            </select>
+            <div className="min-w-0 flex-1">
+              <EditorSelect
+                value={bindingProviderId}
+                ariaLabel={t("models.saveToConnection")}
+                options={providers.map((provider) => ({
+                  value: provider.id,
+                  label: provider.name,
+                }))}
+                onValueChange={setBindingProviderId}
+              />
+            </div>
             <button
               type="button"
               onClick={() => void bind()}
               disabled={busy !== null || bindingProviderId === ""}
-              className="rounded-[7px] border border-border px-3 text-[11px] text-fg-muted hover:bg-tint-hover disabled:opacity-50"
+              className="rounded-[8px] border border-border px-3 text-[11px] text-fg-muted hover:bg-tint-hover disabled:opacity-50"
             >
               {busy === "bind" ? t("models.binding") : t("models.bindAndSave")}
             </button>
@@ -1725,7 +1765,7 @@ function CatalogModelEditor({
           type="button"
           onClick={() => void save()}
           disabled={busy !== null}
-          className="rounded-[7px] bg-accent px-4 py-1.5 text-[11.5px] text-accent-fg disabled:opacity-50"
+          className="rounded-[8px] bg-accent px-4 py-1.5 text-[11.5px] text-accent-fg disabled:opacity-50"
         >
           {busy === "save" ? t("models.binding") : t("models.saveCatalog")}
         </button>
@@ -1780,7 +1820,7 @@ function Capability({
       <span className="min-w-0 flex-1 text-[11.5px] text-fg-muted">
         {label}
       </span>
-      <Toggle checked={value} onChange={onChange} label={label} />
+      <Switch checked={value} onCheckedChange={onChange} aria-label={label} />
     </div>
   );
 }

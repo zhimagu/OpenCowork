@@ -43,15 +43,16 @@ import { paneOf, type InnerTab } from '../../../../shared/domain/tab'
 import type { Workspace } from '../../../../shared/domain/workspace'
 import type { WorkspaceFileMutationRequest, WorkspaceRecoveryEntry } from '../../../../shared/domain/workspace-file'
 import type { DockNode } from '../../../../shared/domain/dock'
-import { Button } from '../../components/ui/Button'
+import { Button } from '../../components/arc/button/button'
 import type { ContextMenuPosition } from '../../components/ui/ContextMenu'
-import { EmptyState } from '../../components/ui/EmptyState'
+import { EmptyState } from '../../components/arc/empty-state/empty-state'
 import { IconButton } from '../../components/ui/IconButton'
 import { Menu, MenuItem, MenuSeparator } from '../../components/ui/Menu'
 import { cn } from '../../lib/cn'
 import { iconFor } from '../../lib/file-icon'
 import { listDir } from '../../services/app'
-import { listWorkspaceRecovery, mutateWorkspaceFile, isResultUnknown, revealWorkspaceFile, workspaceFileErrorKey, type WorkspaceFilesChanged } from '../../services/workspace-files'
+import { listWorkspaceRecovery, isResultUnknown, workspaceFileErrorKey, type WorkspaceFilesChanged } from '../../services/workspace-files'
+import { awaitDocumentSaves, mutateWorkspaceFile, revealWorkspaceFile } from '../../actions/workspace-files'
 import { confirmDocumentChanges } from '../../stores/documents'
 import { fileTreeViewKey, pruneListings, useFileTreeStore } from '../../stores/file-tree'
 import { useTabsStore } from '../../stores/tabs'
@@ -311,6 +312,12 @@ function WorkspaceFilesView({
     try {
       if (request.operation === 'rename' || request.operation === 'move' || request.operation === 'delete') {
         setConfirmingChanges(true)
+        // 破坏性操作前先等源/目标路径上还在飞的保存(闸门在 `mutateWorkspaceFile` 里,
+        // 这里提前一次是为了让挽留对话框在保存落定之后才弹)。
+        await awaitDocumentSaves(workspace.id, [
+          request.path,
+          ...(request.destination === undefined ? [] : [request.destination])
+        ])
         const confirmed = await confirmDocumentChanges(workspace.id, request.path)
         if (!alive.current) return
         setConfirmingChanges(false)
@@ -467,7 +474,7 @@ function WorkspaceFilesView({
               <Search size={14} />
             </IconButton>
           ) : (
-            <div className="flex min-w-0 flex-1 items-center gap-1 rounded-[7px] bg-surface-input px-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1 rounded-[8px] bg-surface-input px-1.5">
               <Search size={12} className="shrink-0 text-fg-faint" />
               <input
                 autoFocus
@@ -627,7 +634,7 @@ function WorkspaceFilesView({
       )}
       {notice !== null && (
         <div role={notice.error ? 'alert' : 'status'} className={cn(
-          'mx-2 mb-1.5 flex items-start gap-1 rounded-[7px] bg-tint px-2 py-1.5 text-[12px]',
+          'mx-2 mb-1.5 flex items-start gap-1 rounded-[8px] bg-tint px-2 py-1.5 text-[12px]',
           notice.error ? 'text-danger' : 'text-fg-muted',
         )}>
           <span className="min-w-0 flex-1 break-words">{t(notice.key, { path: notice.path ?? '' })}</span>
@@ -648,19 +655,20 @@ function WorkspaceFilesView({
         className="scroll-thin min-h-0 flex-1 overflow-y-auto px-1.5 pb-2"
       >
         {scope === 'conversation' ? (
-          <EmptyState title={t('files.noConversation')} hint={t('files.noConversationHint')} className="py-10" />
+          <EmptyState title={t('files.noConversation')} description={t('files.noConversationHint')} className="py-10" />
         ) : failed.has(rootPath) ? (
           <div className="flex flex-col items-center py-8">
-            <EmptyState title={t('files.unreadable')} hint={t('files.unreadableHint')} className="pb-4" />
-            <Button size="sm" onClick={() => load(rootPath)} disabled={loading.has(rootPath)}>
+            <EmptyState title={t('files.unreadable')} description={t('files.unreadableHint')} className="pb-4" />
+            <Button type="button" variant="secondary" size="sm" onClick={() => load(rootPath)} disabled={loading.has(rootPath)}>
               {t(loading.has(rootPath) ? 'common.loading' : 'common.retry')}
             </Button>
           </div>
         ) : root === undefined ? (
-          <EmptyState title={t('common.loading')} className="py-10" />
+          <EmptyState title={t('common.loading')} description="" className="py-10" />
         ) : rows.length === 0 ? (
           <EmptyState
             title={query !== null && query !== '' ? t('files.noMatch') : t('files.empty')}
+            description=""
             className="py-10"
           />
         ) : (
@@ -811,7 +819,7 @@ function TreeRow({
         ...(enterDelay === undefined ? {} : { animationDelay: `${enterDelay}ms` })
       }}
       className={cn(
-        'group relative flex h-[26px] cursor-default items-center gap-1.5 rounded-[7px] pr-1 text-[12.5px]',
+        'group relative flex h-[26px] cursor-default items-center gap-1.5 rounded-[8px] pr-1 text-[12.5px]',
         'transition-colors select-none outline-none focus-visible:ring-1 focus-visible:ring-accent',
         // 悬停底色不在行上:由 `TreeHoverGlide` 那一块在行之间滑动,这里只换字色
         selected ? 'bg-surface-raised text-fg' : 'text-fg-muted hover:text-fg',

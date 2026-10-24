@@ -24,9 +24,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Bootstrap } from '../../../shared/domain/bootstrap'
 import type { ClientAuthState } from '../../../shared/domain/client-auth'
 import type { AppSettings, AppSettingsPatch } from '../../../shared/domain/settings'
-import { Button } from '../components/ui/Button'
+import { Button } from '../components/arc/button/button'
 import { IconButton } from '../components/ui/IconButton'
-import { Segmented } from '../components/ui/Segmented'
+import SegmentedControl from '../components/arc/segmented-control/segmented-control'
 import { TextInput } from '../components/ui/TextInput'
 import { useFocusTrap } from '../components/ui/useFocusTrap'
 import { prettyAccelerator } from '../lib/accelerator'
@@ -46,6 +46,8 @@ import {
 import { AboutPage } from './pages/AboutPage'
 import { ConnectionPage } from './pages/ConnectionPage'
 import { DataPage } from './pages/DataPage'
+import { ExperimentalPage } from './pages/ExperimentalPage'
+import { DevicesPage } from './pages/DevicesPage'
 import { ImportPage } from './pages/import/ImportPage'
 import { GeneralPage } from './pages/GeneralPage'
 import { ModelPage } from './pages/model/ModelPage'
@@ -159,15 +161,15 @@ export function SettingsOverlay({
       aria-modal="true"
       aria-label={t('common.settings')}
     >
-      {/* 纯黑 35% —— 这个数是从参考图反解出来的,见 theme.css 的 --color-scrim */}
-      <div className="absolute inset-0 bg-scrim/35 backdrop-blur-[2px]" onClick={requestClose} />
+      {/* 苹果风格:轻遮罩、不模糊 —— 面板自己是毛玻璃,背景糊掉反而看不出玻璃感 */}
+      <div className="absolute inset-0 bg-scrim/20" onClick={requestClose} />
 
       <div
         ref={panelRef}
         tabIndex={-1}
         className={cn(
           'relative flex h-[720px] max-h-full w-full max-w-[1058px] overflow-hidden',
-          'rounded-panel shadow-2xl shadow-black/40 outline-none',
+          'apple-sheet outline-none',
           // Menu uses viewport coordinates while remaining inside this panel;
           // keep the ancestor transform-free so its fixed positioning stays exact.
           'transition-opacity duration-280 ease-panel motion-reduce:transition-none',
@@ -208,11 +210,11 @@ export function SettingsOverlay({
                     className={cn(
                       'flex h-[34px] w-full items-center gap-2.5 rounded-[8px] px-2.5',
                       'text-left text-[13px] transition-colors',
-                      // 选中 = 往暗里挖,悬停 = 往暖里偏。两个维度,不互相盖
-                      on ? 'bg-surface-sunken text-fg' : 'text-fg hover:bg-tint-hover'
+                      // 苹果风格:选中 = 强调色实底白字(系统设置的侧栏),悬停只淡淡一层
+                      on ? 'bg-accent text-accent-fg' : 'text-fg hover:bg-fg/6'
                     )}
                   >
-                    <span className="shrink-0 text-icon">
+                    <span className={cn('shrink-0', on ? 'text-accent-fg' : 'text-icon')}>
                       <Icon size={15} />
                     </span>
                     <span className="min-w-0 flex-1 truncate">{pageLabel(t, p.id)}</span>
@@ -233,12 +235,11 @@ export function SettingsOverlay({
           <header className="flex shrink-0 items-center gap-4 px-6 pt-5 pb-3">
             <h2 className="text-[15px] text-fg">{searching ? t('settings.searchResults') : pageLabel(t, visiblePage)}</h2>
             {!searching && availableSubs !== undefined && (
-              <Segmented
-                size="sm"
+              <SegmentedControl
                 label={`${pageLabel(t, visiblePage)}${t('settings.categorySuffix')}`}
                 value={activeSub}
                 options={(availableSubs ?? []).map((s) => ({ value: s.id, label: s.label }))}
-                onChange={setSub}
+                onValueChange={setSub}
               />
             )}
             <span className="flex-1" />
@@ -263,13 +264,13 @@ export function SettingsOverlay({
           </div>
 
           <footer className="flex h-[82px] shrink-0 items-center justify-end px-6">
-            <Button variant="accent" onClick={requestClose}>
+            <Button type="button" variant="primary" onClick={requestClose}>
               {t('common.done')}
             </Button>
           </footer>
         </div>
       </div>
-      <Dialog open={confirmClose} title={t('themeStudio.unsaved')} onClose={() => setConfirmClose(false)} footer={<><Button variant="ghost" onClick={() => setConfirmClose(false)}>{t('common.cancel')}</Button><Button onClick={() => { discardThemeDraft(); setConfirmClose(false); onClose() }}>{t('themeStudio.discard')}</Button></>}>
+      <Dialog open={confirmClose} title={t('themeStudio.unsaved')} onClose={() => setConfirmClose(false)} footer={<><Button type="button" variant="secondary" onClick={() => setConfirmClose(false)}>{t('common.cancel')}</Button><Button type="button" variant="secondary" onClick={() => { discardThemeDraft(); setConfirmClose(false); onClose() }}>{t('themeStudio.discard')}</Button></>}>
         <p>{t('themeStudio.discardHint')}</p>
       </Dialog>
     </div>
@@ -318,6 +319,11 @@ function PageBody({
       return <ConnectionPage {...props} />
     case 'data':
       return <DataPage {...props} />
+    /* ★ 不吃 `SettingsPageProps`:设备清单是这台电脑本地的,不属于会同步到账户的设置。 */
+    case 'devices':
+      return <DevicesPage />
+    case 'experimental':
+      return <ExperimentalPage {...props} />
     case 'about':
       return <AboutPage versions={versions} />
     default:

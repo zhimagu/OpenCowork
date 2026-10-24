@@ -16,6 +16,26 @@ const DEEPSEEK_EFFORT_THINKING: ThinkingConfig = {
 }
 
 export const DEEPSEEK: readonly BuiltinModelRecord[] = [
+  // 1017 版本已在 NextCoWork 渠道上架;官方 API 使用 deepseek-flash 指向同一版本。
+  model('deepseek', 'deepseek-v4.1-flash-1017', 'DeepSeek V4.1 Flash 1017', {
+    capabilities: visionCapabilities({
+      thinking: true,
+      tools: true,
+      caching: true,
+      structuredOutput: true,
+      streaming: true,
+    }),
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    thinkingConfig: DEEPSEEK_EFFORT_THINKING,
+    reasoningEfforts: ['none', 'low', 'high', 'max'],
+    aliases: ['deepseek-flash'],
+    source: {
+      url: 'https://nextco.work/models/deepseek-v4.1-flash-1017',
+      fetchedAt: '2026-10-19',
+    },
+    verificationStatus: 'official-api',
+  }),
   // DeepSeek announced this as a time-limited preview on 2026-09-08. Its
   // public announcement confirms native multimodal input and says billing
   // follows V4 Flash, but does not publish independent limits. Keep the
@@ -35,6 +55,24 @@ export const DEEPSEEK: readonly BuiltinModelRecord[] = [
     aliases: ['deepseek-v4.1-flash', 'deepseek-v4.1-flash-beta'],
     pricingModelId: 'deepseek-v4-flash',
     source: source('https://api-docs.deepseek.com/'),
+    verificationStatus: 'unverified',
+  }),
+  // NextCoWork 内置渠道的极速档。规格取自 https://nextco.work/models/deepseek-v4.1-flash-ultrafast
+  // (1M 上下文 / 384K 输出、视觉输入、函数调用、结构化输出、prompt 缓存);页面未列思考档位,
+  // 沿用 V4 系的方言。
+  model('deepseek', 'deepseek-v4.1-flash-ultrafast', 'DeepSeek V4.1 Flash Ultrafast', {
+    capabilities: visionCapabilities({
+      thinking: true,
+      tools: true,
+      caching: true,
+      structuredOutput: true,
+      streaming: true,
+    }),
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
+    thinkingConfig: DEEPSEEK_EFFORT_THINKING,
+    reasoningEfforts: ['none', 'low', 'high', 'max'],
+    source: source('https://nextco.work/models/deepseek-v4.1-flash-ultrafast'),
     verificationStatus: 'unverified',
   }),
   model('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro', {

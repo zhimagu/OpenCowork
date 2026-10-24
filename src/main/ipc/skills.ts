@@ -16,7 +16,6 @@
  * 合起来才是「这一轮下发哪几条」,而那个合并只在 `runtime.ts` 的
  * `activeSkills()` 里做一次 —— 这里只负责把两份状态如实显示给用户。
  */
-import { dialog } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { dirname, isAbsolute, relative } from 'node:path'
@@ -31,7 +30,7 @@ import { matchesProjectSkillPath, nextActiveSkillIds, sameSkillIdList } from '..
 import { PROJECT_SKILLS_PREFIX, SKILLS_DIR, currentPluginSkillRoots, scanSkills } from '../kernel/skill/load'
 import { store } from '../state/store'
 import { windows } from '../window/registry'
-import { getClientAccessToken, getClientAuthState } from './client-auth'
+import { clientAccessToken, isClientAuthenticated } from '../services/client-auth-port'
 
 const MARKET_ORIGIN = 'https://nextco.work'
 const MARKET_API_BASE = `${MARKET_ORIGIN}/api/`
@@ -80,7 +79,19 @@ function emitInstallProgress(
  */
 function installMessageKey(error: unknown): string {
   const message = error instanceof Error ? error.message : ''
-  return message.startsWith('skills.') ? message : 'skills.operationFailed'
+  if (message.startsWith('skills.')) return message
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') return 'skills.diskPermission'
+  if (code === 'ENOSPC') return 'skills.diskFull'
+  // undici 把网络层失败包成 `TypeError: fetch failed`,没有 skills. 前缀
+  if (error instanceof TypeError && message === 'fetch failed') return 'skills.networkFailed'
+  if (/ZIP 文件过大|解压后体积过大/.test(message)) return 'skills.packageTooLarge'
+  if (/摘要校验失败/.test(message)) return 'skills.digestMismatch'
+  if (/SKILL\.md/.test(message) && !/顶层目录/.test(message)) return 'skills.skillMdInvalid'
+  if (/^ZIP|顶层目录/.test(message)) return 'skills.zipInvalid'
+  if (message === '市场没有可安装版本') return 'skills.noVersion'
+  if (message === 'Skill 安装后未能加载') return 'skills.notLoaded'
+  return 'skills.operationFailed'
 }
 
 /**
@@ -163,13 +174,6 @@ async function installPackage(path: string, scope: SkillInstallScope, workspaceI
   } finally { lease?.release() }
 }
 
-export async function pickSkillZip(): Promise<{ path: string; name: string } | null> {
-  const result = await dialog.showOpenDialog({ title: '选择 Skill ZIP', properties: ['openFile'], filters: [{ name: 'Skill ZIP', extensions: ['zip'] }] })
-  if (result.canceled || !result.filePaths[0]) return null
-  const path = result.filePaths[0]
-  return { path, name: path.split(/[\\/]/).pop() ?? 'skill.zip' }
-}
-
 export async function installZip(req: { path: string; workspaceId?: string; scope?: SkillInstallScope }): Promise<SkillListItem> {
   const scope = req.scope ?? 'global'
   /*
@@ -190,8 +194,9 @@ export async function installZip(req: { path: string; workspaceId?: string; scop
     emitInstallProgress(key, 'done')
     return found
   } catch (error) {
-    emitInstallProgress(key, 'failed', { messageKey: installMessageKey(error) })
-    throw error
+    const messageKey = installMessageKey(error)
+    emitInstallProgress(key, 'failed', { messageKey })
+    throw messageKey === 'skills.operationFailed' ? error : new Error(messageKey)
   }
 }
 
@@ -247,8 +252,9 @@ export async function installMarketSkill(req: { slug: string; version?: string; 
       能从 invoke 的 rejection 里知道结果,而**别的窗口**手上只有事件 ——
       它们那颗按钮会一直转下去,直到 3 分钟的兜底把它扫掉。
     */
-    emitInstallProgress(key, 'failed', { messageKey: installMessageKey(error) })
-    throw error
+    const messageKey = installMessageKey(error)
+    emitInstallProgress(key, 'failed', { messageKey })
+    throw messageKey === 'skills.operationFailed' ? error : new Error(messageKey)
   }
 }
 
@@ -256,8 +262,8 @@ async function runMarketInstall(key: string, req: { slug: string; version?: stri
   // 授权、问详情、要摘要都在这一档里:它们加起来常常比下载还久,而且一个
   // 百分比都报不出来 —— 渲染层据此画滚动斜纹,不是一条停在 0% 的条子。
   emitInstallProgress(key, 'preparing')
-  if (getClientAuthState().mode !== 'authenticated') throw new Error('skills.authRequired')
-  const access = await getClientAccessToken()
+  if (!isClientAuthenticated()) throw new Error('skills.authRequired')
+  const access = await clientAccessToken()
   if (!access) throw new Error('skills.authRequired')
   const detail = await marketSkillDetail({ slug: req.slug })
   const version = req.version ?? detail.version ?? detail.versions?.[0]?.version

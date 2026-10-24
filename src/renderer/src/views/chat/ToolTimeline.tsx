@@ -266,10 +266,15 @@ const GROUP_TITLE_KEYS = {
   interaction: "chat.tool.group.interaction",
   widget: "chat.tool.group.widget",
   image: "chat.tool.group.image",
+  // 生成视频。同 image:产物不进过程段,但一个组里仍可能混进它 —— 少了这一行
+  // 那个组的标题会显示成 key 本身。
+  video: "chat.tool.group.video",
   // 页面截图（browser_screenshot）。它不进过程段（见 isPinnedShape），
   // 但一个组里仍可能混进它（比如卡片还没提交、或用户手动展开了工作区）——
   // 少了这一行，那个组的标题会显示成 key 本身。
   screenshot: "chat.tool.group.screenshot",
+  // 工作流画布同样不进过程段,理由同上一行
+  workflow: "chat.tool.group.workflow",
   external: "chat.tool.group.external",
 } as const satisfies Record<ReturnType<typeof shapeOfItem>, TranslationKey>;
 

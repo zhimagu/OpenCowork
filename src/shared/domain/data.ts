@@ -195,11 +195,18 @@ export interface CleanupResult extends CleanupPreview {
   deleted: number
 }
 
-export type CleanupAge = 3 | 6 | 12
+/** `'7d'` / `'15d'` 表示天数；数字表示日历月数。 */
+export type CleanupAge = '7d' | '15d' | 1 | 3 | 6 | 12
 
-/** 截止时间：当前时刻往前 N 个月，按日历月而不是固定 90 天。 */
-export function cutoffForAge(now: number, months: CleanupAge): number {
+/** 截止时间：当前时刻往前 N 天，或往前 N 个月（按日历月而不是固定 90 天）。 */
+export function cutoffForAge(now: number, age: CleanupAge): number {
   const date = new Date(now)
+  if (typeof age === 'string') {
+    // 按日历日回退，跨夏令时也保留同一时分秒。
+    date.setDate(date.getDate() - (age === '7d' ? 7 : 15))
+    return date.getTime()
+  }
+  const months = age
   const day = date.getDate()
   // Move through day 1 first. Native Date#setMonth overflows at month ends
   // (May 31 - 3 months becomes March 3), which would delete several extra
@@ -361,6 +368,14 @@ function isAppSettings(value: unknown): boolean {
     (has(v, 'compactModel') && typeof v.compactModel !== 'string') ||
     !optionalString(v, 'compactModelProviderId') ||
     (has(v, 'compactThinking') && !isSubagentThinking(v.compactThinking)) ||
+    // ★ 输入框补全那五项同理:缺席 = 旧导出,放行并与默认值合并;在场就必须类型正确
+    (has(v, 'promptSuggestions') && typeof v.promptSuggestions !== 'boolean') ||
+    (has(v, 'completionModel') && typeof v.completionModel !== 'string') ||
+    !optionalString(v, 'completionModelProviderId') ||
+    (has(v, 'localCompletion') && typeof v.localCompletion !== 'boolean') ||
+    (has(v, 'inlineCompletion') && typeof v.inlineCompletion !== 'boolean') ||
+    (has(v, 'inlineCompletionModel') && typeof v.inlineCompletionModel !== 'string') ||
+    !optionalString(v, 'inlineCompletionModelProviderId') ||
     typeof v.defaultModel !== 'string' ||
     !optionalString(v, 'defaultModelProviderId') ||
     // ★ 生图模型那一对同理:缺席 = 旧导出,放行并与默认值合并(默认是「没选过」,
@@ -370,6 +385,8 @@ function isAppSettings(value: unknown): boolean {
     // 生图开关同理:缺席 = 旧导出,放行(默认开启);在场就必须是布尔
     (has(v, 'imageGenerationEnabled') && typeof v.imageGenerationEnabled !== 'boolean') ||
     (has(v, 'contextManagement') && !isContextManagementSettings(v.contextManagement)) ||
+    // 实验块是后加的:缺席 = 旧导出,放行(默认全关);在场就必须形状正确
+    (has(v, 'experimental') && !isExperimentalSettings(v.experimental)) ||
     !isSubagentSettings(v.subagent) ||
     !isGatewaySettings(v.gateway) ||
     !isNotificationSettings(v.notifications) ||
@@ -419,6 +436,10 @@ function isThemeStudioSettings(value: unknown): boolean {
     isRecord(v.overrides) &&
     Object.values(v.overrides).every((c) => typeof c === 'string')
   )
+}
+
+function isExperimentalSettings(value: unknown): boolean {
+  return isRecord(value) && optionalBoolean(value, 'workflow') && optionalBoolean(value, 'workflowConfirm')
 }
 
 function isContextManagementSettings(value: unknown): boolean {
@@ -731,6 +752,7 @@ function isCapabilities(value: unknown): boolean {
 function isThinkingConfig(value: unknown): boolean {
   if (!isRecord(value)) return false
   if (!enumValue(value.mode, ['unsupported', 'always', 'toggle', 'effort', 'budget']) || !isBoolean(value.defaultEnabled) || (has(value, 'defaultEffort') && !enumValue(value.defaultEffort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])) || (has(value, 'defaultBudgetTokens') && !isIntegerAtLeast(value.defaultBudgetTokens, 0)) || !optionalString(value, 'parameterPath')) return false
+  if (has(value, 'anthropicAdaptive') && (!isBoolean(value.anthropicAdaptive) || (value.anthropicAdaptive && value.mode !== 'effort'))) return false
   if ((has(value, 'enabledValue') && !isJsonValue(value.enabledValue)) || (has(value, 'disabledValue') && !isJsonValue(value.disabledValue))) return false
   const parameterPath = typeof value.parameterPath === 'string' ? value.parameterPath.trim() : ''
   const leaf = parameterPath.split('.').at(-1)

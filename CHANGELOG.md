@@ -1,6 +1,511 @@
 ﻿# 更新日志
 
 
+## v2.8.5
+
+### 新增
+
+- **内置模型目录新增 `deepseek-v4.1-flash-1017`**:补齐 1M 上下文、384K 输出、视觉输入、工具调用与思考配置,兼容官方 `deepseek-flash` 别名。同步录入基础分时价(每百万 tokens 输入 $0.15 / 输出 $0.6 / 缓存命中 $0.003,高峰时段 ×2),采集日期为 2026-10-19
+
+### 修复
+
+- **启动失败:`ConfigProfileError: configProfile.workspaceOwned`**:默认工作区的 id 已被另一个配置作用域占用(切换过账户后,当前作用域看不见那一行,查重没拦住),写入被拒绝并让整个本地服务初始化失败。现在遇到这种冲突会改用新的 id 重建默认工作区,不再阻断启动;原有数据不受影响
+- **工具授权选项不再被长参数挤出视野(#179)**:参数预览与编辑器独立滚动,「允许这一次 / 以后都允许 / 改完参数再允许」固定在卡片下方;小窗口按聊天区实际高度压缩预览,编辑时的提交、取消、拒绝与错误提示保持可见
+
+## v2.8.4
+
+### 新增
+
+- **终端里 ⌘+点击打开链接(#178)**:`npm run dev` 打出的 `http://localhost:5173` 这类地址,按住 ⌘(非 macOS 为 Ctrl)点击即可跳系统浏览器,与 macOS「终端」/ VS Code 一致。必须带修饰键,裸点击仍用于选中文本和全屏 TUI 的鼠标事件。新增依赖 `@xterm/addon-web-links`
+
+### 修复
+
+- **终端认不出 brew / nvm 装的命令(#178)**:交互终端改为以登录 shell(`-l`)启动,能读到 `~/.zprofile` / `~/.bash_profile` 里的 PATH;Windows 与不认识的 shell 保持原样
+- **Skill 安装失败的提示更具体**:磁盘权限不足、磁盘已满、网络失败、ZIP 结构或 SKILL.md 不合法、包过大、摘要校验失败、市场无可安装版本、写入后未能加载,各有对应文案(中英文);仍认不出的错误在通用提示后附上原始信息
+- `provider:changed` 广播(账号切换、客户端登录同步、配置同步)统一使用解析后的模型列表
+
+### 安全
+
+- `openExternal` 由「仅 https」放宽为 http(s);`file:`、自定义协议与带账号密码的链接仍然拒绝
+
+### 测试
+
+- 新增 `terminalShellArgs` 用例,本地 Shell 配置生效范围的断言跟上登录参数
+
+## v2.8.3
+
+### 修复
+
+- **设备服务安装示例补上 `--advertise`**:`ncw-device-service` 监听 `0.0.0.0` 时必须指定桌面端连它用的主机名或局域网 IP,原示例命令漏了这一项,照抄会配对失败。设置 → 设备页的第三步命令、`README.md` 与 `README.zh-CN.md` 同步改为 `--advertise nas.lan`,并在中英文说明里写明「把 nas.lan 换成实际主机名或 IP」
+- **设备服务启动失败时带出具体原因**:此前只打印 `device service failed to start`,无从排查;现在附上底层错误信息(用法错误的 `usage:` 输出与退出码 64 不变)
+
+## v2.8.2
+
+### 新增
+
+- **新增 Atlas Cloud 供应商预设**:作为聚合渠道内置,提供三个端点 —— OpenAI Chat(`https://api.atlascloud.ai/v1`,模型列表公开)、OpenAI Responses(同一 base)与 Anthropic(`https://api.atlascloud.ai`,客户端自行补 `/v1/messages`)。品牌图标改用 lobehub 的 atlascloud 字形,不再退化成首字母;未标为推荐
+- **内置模型目录新增 `deepseek-v4.1-flash-ultrafast`(DeepSeek V4.1 Flash Ultrafast)**:NextCoWork 内置渠道的极速档,1M 上下文 / 384K 输出,支持视觉输入、函数调用、结构化输出与 prompt 缓存;页面未列思考档位,沿用 V4 系的思考方言。同步写入价格种子(输入 0.3 / 输出 1.2 / 缓存读 0.006),规格状态标为「未核实」
+
+### 文档
+
+- `baseurl.ts` 的 `/v1` 对照表补上 Atlas Cloud
+
+### 测试
+
+- 供应商预设测试钉住 Atlas Cloud 的 Anthropic URL,并把它加入公开模型列表集合、品牌表与 `resolveBrand` 样例
+
+## v2.8.1
+
+### 新增
+
+**输入框补全:回合结束后建议下一步、历史与文件补全、打字时续写(灰字 + Tab 接受)**
+
+- 三层共用一套灰字:回合成功结束后预测下一句(L2)、你发过的指令名与热文件名的本地补全(L1)、停顿后由模型续写这一句(L3)。**同一时刻只画一条**,优先级是建议 > 历史 > 文件 > 续写,而建议只在空草稿时出现,和另外两层不冲突。接受和发送是两个动作:Tab 或 → 填入,⌘/Ctrl+→ 按词填,Esc 关掉(同一条不再冒出),**Enter 永远是发送** —— 一条被误发的「提交并推送」可能正跑在完全访问档位上(Claude Code 曾让 Enter 直接发出建议,后来以「误执行」修掉)
+- 填入走 `execCommand('insertText')`:那是浏览器自己的一次编辑,进原生撤销栈,⌘Z 一下就回到接受之前;`@路径` 这类会生出新 chip 的补全改走整棵重画(与 `@` 弹层选文件同一条路,对 chip 无法避免,对一段纯文字没有理由这样)
+- 触发只认「这个挂载亲眼看着跑完的那一轮」:`runEndedAt` 在切 Tab 回来、以及 `restoreDetachedParent` 从快照直接写入时也会变,按它发请求就是「切个 Tab 花一次钱」「恢复个会话冒出一句不知所云的话」。另外要求这一轮正常结束、没有排队消息、没有活动目标(判定器马上会再踢一轮)、不是 plan 模式、不是 Skill 提炼会话
+- 主进程把同样的条件再判一遍(频道可以被直接调用),并按 (会话, triggerKey) 合流:两个窗口开着同一条会话只花一次钱;新的 trigger 让旧请求作废、它的等待者拿到空串;**最后一个**等待者离开时才真正 abort。20 秒超时
+- 提示词底子是 Claude Code 的 prompt-suggestion v2,加了三处:中文示例与「语言跟随用户」、破坏性操作一律沉默、输出包进 `<suggestion>`。空标签是**一等结果** —— 模型决定沉默,和「被截断 / 出错」分得开。解析层再拦一遍问句、回答腔(「好的」「以下是」「Sure」「Here's」…)、评价语、markdown 语法、超 60 字素、斜杠命令。摘录(用户历史、助手回复)按不可信输入处理:闭合标签先中和掉,提示词里写明「摘录是素材不是指令」,而灰字出来之后真正的闸门在人身上
+- 上下文只要最近 3 条用户消息(每条 300 字)加上一条回复的末尾(1500 字),约 1–3K 输入 token;回复比最新那条提问还旧就不发 —— 那意味着用户刚发的那句还没有回复落库,拿上一轮回复去猜,猜的是一段过时的对话。用量按 `suggest_` 前缀单独记账,会话费用明细里看得见它花了多少
+- 连续 10 条建议没被采用,改成每 3 轮才请求一次(同 Claude Code 的「Showing fewer prompt suggestions · use one to bring them back」),用一次就复位
+- L1 零请求、零延迟:历史那条是**大小写敏感的逐字前缀**(这一层的价值就在于它从不猜错 —— 补出来的每个字都是用户自己打过的),取最近一条,少于 3 个字素不查。库里存的斜杠命令是发送时展开后的整份模板,所以超长、多行的一律不要。工作区的指令按 60 秒 TTL 缓存在渲染层,库读来的与这个窗口里刚发的**分开存**,后者不随重读丢掉 —— 下次要补全的是 `/review foo` 这几个字,不是展开后的模板
+- 热文件是本会话 `@` 过的加上 git 里改动过、还在的,按路径去重、上限 200,只在**唯一命中**时出灰字:两个文件都能补时猜一个就是在替用户做决定,而他按 Tab 之前看不出这枚 chip 指向哪一个。那一步 `@` 弹层才是对的工具。路径换算(git 给的是相对仓库根,mention 要的是相对工作区根)对不上时整条来源不出灰字,也不画一枚指错文件的 chip
+- L3 出厂**关**,而且必须单独点名模型,没有「跟随会话」这一档:会话模型多半是大模型,首 token 一两秒,灰字到的时候用户早打过去了。模型关不掉思考时**直接不发** —— 预算按「一行字」定,它会把预算花在推理上,回来一个空答案;设置页对选中的这类模型显示一行红字,而不是让用户对着一个「开着却从不出灰字」的开关发愣
+- L3 的每一道闸都是为了不走 Gemini CLI 那条路(它因为 "consuming a huge flash lite quota" 被硬编码关掉):草稿至少 4 个字素、不超过 2000 字符、不以句末标点或换行结尾、看起来像密钥的草稿在**任何网络动作之前**就判掉(一个字节都不发出去)、有本地灰字就不发、弹层开着 / 组词中 / 光标不在末尾 / 刚粘贴完都不发、每分钟最多 20 次、结果按「模型 + 上下文」的 sha1 缓存 100 条(空结果也缓存 —— 同一个前缀模型说过「猜不出」,再问一遍答案多半一样)。连续 10 次显示了却没被采用,防抖从 300ms 提到 1000ms
+- L3 每次请求各自单飞(每个窗口、每条会话一个槽),新请求让旧的立刻作废;4 秒超时 —— 再慢的灰字都没有意义。被 `max_tokens` 截断时只要开标签见过,前半句照样用,解析器在最近的词边界收口
+- 上下文里「稳定在前、易变在后」不是洁癖:同一轮里逐字打字时,草稿之前那一大段字节不变,支持前缀缓存的供应商只为草稿付全价
+- 灰字不碰可编辑 DOM:空草稿画在原有的占位符层,非空草稿画成根节点上的 `data-ghost` + CSS `::after`。伪元素不是节点,`readDraft` / `domDirty` / 光标 / 撤销栈都看不见它,组词也不会被它打断;它接在最后一个子节点后面,而灰字只在光标折叠于末尾时出现,所以正好落在光标之后。草稿以换行结尾时一律不显示 —— `renderDraft` 会在末尾补一个 `<br>`,`::after` 会掉到光标**下面**一行
+- 跟打(typed-through)是免费的:灰字存的是「出现那一刻的草稿 + 要补的那段」,用户接着按键时剩下要画的只是 `(base + text).slice(草稿长度)`(与 VS Code / Continue 同一套做法),对不上就清掉、续写重新防抖
+- 按键、跟打、四个来源各自怎么算、按词接受全部是纯函数(`ghost.ts` / `ghost-state.ts` 里没有一行碰 DOM),每条规则都能在 node 单测里直接验。按词接受用 `Intl.Segmenter` 的 word 粒度而不是按空格:中文没有空格,按空格切的话一整句就是「一个词」;切点落进 mention 原文中间时延到它的末尾(chip 是原子的,接受半个 `[a.ts](src/a` 毫无意义)
+- 键归谁只有一处判据:Enter 永远不归灰字;带修饰键的 Tab / Esc / → 不归(Shift+Tab 是反向切焦点、Alt+→ 是按词移动光标);`@` / `/` 弹层开着时 Tab 照旧归弹层;组词中一律不碰 —— 除 `isComposing` 之外再认 `keyCode === 229`,Safari 的 `compositionend` 抢在确认键之前发,那一下 `isComposing` 已经是 false 了
+- 一切长度都按**字素**(`Intl.Segmenter`)算,不按空格切词也不按 UTF-16 码元:中文没有空格、emoji 一个字素占两三个码元,按空格数的话一整句中文要么全放行要么全丢(正是 Claude Code 2.1.269 修掉的那类 bug)。两端共用的这套判据放在 `shared/domain/composer-completion.ts`:同一条规则要在两头各判一次,各写一份迟早出现「渲染层以为是密钥不发、主进程却照样放行」
+- 可发现性与无障碍:灰字旁边挂一枚 `Tab` 键帽(用户普遍不知道灰字可以按 Tab 接受;接受过 3 次之后收起,记号存在本地)、读屏用一个视觉隐藏的 `aria-live` 播报且同一条只播一次、根节点加 `writingsuggestions="false"` 免得和系统或 Chromium 自带的输入预测叠成两层。还没发过消息的会话占位符多教一句「输入 @ 引用文件,/ 使用命令」
+- 设置 › 通用 › 代理新增三栏:建议下一步(出厂**开**)、历史与文件补全(出厂开)、打字时续写(出厂**关**、必须点名模型;说明里写明每次停顿都会把草稿发给该模型的供应商并产生费用 —— 那是用户打开它之前唯一能看到的隐私与费用提示)。两个模型选择器只在对应的开关打开时出现,而不是留一个永远不生效的空栏
+- 补全模型跟着所属供应商走:供应商被删时,续写那个**整对清空**(不解锁成裸别名 —— 静默换到另一家的同名模型,账单会在用户毫无察觉时换一家累积;空串在这一栏的意思是「未选择、续写不生效」,正是安全的那一头),建议那个清成空串 = 跟随输入框;改别名时跟着改。同步档里两个补全模型与各自的开关归 `providers`,本地补全不碰任何模型,归 `preferences`
+- 四条频道都是「设备」边界(它们读会话历史、也会调上游),设备模式下主进程没有路由 —— 渲染层先跳过,免得每一轮去撞一次注定失败的 IPC。渲染层的开关是主进程设置的镜像(权威在主进程),握手拿到设置之前一律按「关」算:宁可首屏少一句建议,也不在用户关掉功能的情况下先发一次请求
+
+**`/init` 改为加载内置 Skill,并新增仓库地图与仓库记忆**
+
+- `/init` 从「命令里内嵌一段 30KB 的提示词」改成一层薄壳:加载内置 Skill `repo-init`,由它产出 `AGENTS.md`(约束)、`.agents/codemap/`(模块、跨模块流程、领域概念)与 `.agents/memory/`(仓库记忆)。方法论住在 `resources/skills/repo-init/SKILL.md` —— 它要分阶段派子代理、带一整套页面模板、还会持续迭代,放在 Skill 里改了 resources 重启即生效,不必发版改代码。命令副标题同步改成「深入分析项目,生成 AGENTS.md、仓库地图与仓库记忆」
+- Skill 必须保持**单文件**:全局 Skill 的目录里只要有 `SKILL.md` 之外的东西,SSH 会话里就会被标成 `client-assets` 拒掉,而「在服务器上的仓库里跑 /init」正是常见用法。用户能用同名的项目 Skill 覆盖它(安装器不动用户自己装的同名包)
+- 找不到 Skill 时**停下**,不让模型凭印象自己写:被禁用、或工作区只选装了别的 Skill 时它不在目录里,这时凭项目名和几个文件名脑补出来的 AGENTS.md 看起来完全正常,但每一条命令都是猜的 —— 比告诉用户去扩展面板重新启用更糟
+- 支持参数:`[update|agents-only] [--no-history]`
+- 顺带修掉内置哨兵被判成「远端资产」:`.nextcowork-bundled` 是安装器自己写进包目录的元数据,和包清单一样不是正文会引用的资产,不放过它的话**每一条**内置 Skill(哪怕是单文件)在 SSH 会话里都会被拒
+
+### 修复
+
+**macOS 上「重启更新」装不上,要等到用户哪天手动退出**
+
+- 原先直接调 `quitAndInstall()`:它在 macOS 上先逐个关窗、等窗口全关完才退出并把安装交给 ShipIt,而主窗的 `close` 处理器在退出流程之外只会 `hide()` —— Electron 视为关窗被取消,整次安装静默作废。进程留着,更新包也留着,ShipIt 一直等到用户哪天手动退出才装上(ShipIt 日志里从 "install request" 到 "Installation completed" 隔了几个小时,就是这个)
+- 改成两步:先把更新包取到本地暂存,再走应用自己的退出流程(文档预检 → 关窗 → 收尾),真正的安装放在**收尾的最后一步** —— 那时窗口已销毁、数据库已封,原生 `quitAndInstall` 才是一次同步的交接。暂存放在关窗之前,失败了应用还完整可用,能报错也能重试(`autoInstallOnAppQuit = false` 时 electron-updater 在 macOS 上只起了本地代理,要等这一步才让 Squirrel 去取包)
+- 用户取消不算失败:在未保存文档的确认上点了取消、或渲染层顶住 unload,按钮回到可点状态,但**待装状态保留** —— 处理完再退出,照样装
+- 兜底:Windows 上安装器起不来时 electron-updater 不会 quit,macOS 上有漏网的窗口挡住关窗时原生 `quitAndInstall` 也会作废;此刻库已封、进程不能留着,10 秒后普通退出(Squirrel 已暂存的更新在进程退出时照样会装)
+
+### 文档
+
+- 新增 `docs/composer-autocomplete.md`:输入框补全的调研与设计 —— 竞品对比(Claude Code / Codex CLI / Gemini CLI / Open WebUI / Cursor / GitHub Copilot / Gmail Smart Compose / fish 与 zsh-autosuggestions)、可以从别人那里直接拿来用的经验(typed-through、过期丢弃、让位规则、CJK 与组词、可发现性、成本)、三层方案与各自的显示条件、按键表、渲染方案与备选(镜像层)、后端的服务 / IPC / 请求参数 / 上下文裁剪 / 缓存与限流、两份系统提示词原文与后处理规则、设置项、线上指标与离线评测、分期与风险。开头写明状态(P1–P3 已实现)与「与实现不一致之处以代码为准」
+
+### 测试
+
+- 新增输入框补全的用例:建议下一步的上下文裁剪与解析(回答腔 / 问句 / 评价语 / markdown / 超长 / 斜杠命令一律丢弃,空标签 = 沉默)、续写的重叠剥离与词边界截断、LRU 与限流、单飞与合流(两个窗口只发一次、最后一个等待者离开才 abort、窗口销毁)、SQL 侧「用户亲手发的消息」与工作区历史指令(工具结果也是 user 角色,要按轮次开头认定,一轮里几百次工具调用不该把前面几条提问挤出去)、灰字状态机(组词、粘贴保持期、Esc 只作用于那一轮)、跟打、按词接受、按键归属(Enter 不归灰字)、建议触发(挂载时已有的 `runEndedAt` 不算、`restoreDetachedParent` 写入的不算)、灰字在输入框上的渲染、`/init` 的 Skill 缺失路径与内置 Skill 单文件约束
+- `npm run typecheck`(node / web / plugins / controller-client)与 `npm test` 通过:534 个文件 8166 项(6 个文件 40 项因本机缺少原生环境跳过)
+
+## v2.7.3
+
+### 新增
+
+**设置 › 模型:从 models.dev 同步模型与定价**
+
+- 模型管理页新增「从 models.dev 同步模型」。拉取在主进程做(30 秒超时、32MB 上限、不跟随重定向),解析 Anthropic / OpenAI / Google / xAI / DeepSeek / Mistral / Cohere / MiniMax / Moonshot / 智谱 / Qwen / 小米 / Meta 的文本模型,与现有目录对比后分成「新增」和「可更新」两栏,**默认都不勾选**,逐条确认才写入。models.dev 是聚合源,不是官方价目表,写入的行标记为「聚合参考」
+- 已有模型有差异时逐字段显示「旧值 → 新值」(上下文窗口、最大输出、视觉 / 文件 / 视频 / 音频输入、结构化输出、工具调用、推理档位)。只改有差异的字段,思考配置、请求适配、别名原样保留;内置行以覆盖层(`overrideBuiltin`)更新,不改内置数据本身。`tools` 只允许从「不支持」改成「支持」,不会被聚合源反向改掉 —— 反向会让 agent 在不报错的情况下丢掉整份工具定义
+- 思考参数是厂商方言,models.dev 不提供,所以新增模型只从同厂商已核实的内置行借配置,借不到就按不支持思考处理;借来的默认档位会跟着 models.dev 给出的档位列表调整,保证落在列表内。每一行入库前先过目录校验,不合规的丢掉,不会让一行无效拖垮整批写入。只收「只输出文本」的模型,能输出图像等的(如 Nano Banana)留给各自的页签
+- 设置 › 模型定价新增「同步基础定价」:同一份 models.dev 数据按 USD 计价的一手厂商(Anthropic / OpenAI / Google / xAI)解析成价目候选,与当前生效价对比后逐条确认,变更项默认不勾选。采用的价写入 `model_pricing`(`is_seed = 0`),与内置种子合并后参与用量计价,设置页、输入框与会话费用明细按同一份合并表显示;同一模型有同步行时,种子里它的所有行(含带生效日期的区间)整组让位。已落盘的历史花费不回算。预览缓存在主进程、10 分钟过期,「采用」只提交模型 id,界面传不来任意价格
+- 新增 `Gemini 4 Argon`(`gemini-4-argon`)的目录条目与定价:标准档 2026-11-30 前输入 $2 / 输出 $10 / 缓存读 $0.1,2026-12-01 起翻倍;无长上下文分档
+
+### 测试
+
+- 新增 `models-dev` 与 `models-dev-catalog` 的解析 / 对比 / 合并用例,含「档位与默认档不一致」「非文本输出」「输出上限大于上下文」「内置覆盖层作为当前值」「tools 不被反向改写」的回归;`pricing-seed` 的带日期区间断言更新为含 gemini-4-argon
+- 设备服务在 CI 上的三处红(macOS smoke 的邀请时序、Windows 上 pty-helper 与 service-cli 的平台断言)已在 v2.7.2 之后修复,不影响已发布的版本
+
+## v2.7.2
+
+### 新增
+
+**Workflow:把任务编排成依赖图,并行派子代理(实验,出厂关闭)**
+
+- 新增 `Workflow` 工具:模型把一件事写成最多 20 个节点的有向无环图(`id` / `title` / `subagent_type` / `prompt` / `depends_on`),没有依赖关系的节点**同时**派出 —— 不靠模型「记得在一轮里并发调几次 `Task`」。上游的完整结论自动附在下游 prompt 后面(单个上游截到 12K 字符),模型不必把 A 的产出抄进 B 的 prompt。每个节点用**自己的** callId(`<本次调用>#<节点 id>`)去派:渲染层按 callId 索引子代理状态,共用一个的话 N 个子代理会在任务面板里互相覆盖成一个
+- 一个节点失败,**只有依赖它的那些**标成 `skipped`,不相干的分支照常跑完。标了 `allow_partial` 的节点(典型是汇总)等所有上游落定,只要有一个完成就照跑,没完成的那几个在 prompt 里列成「缺失」—— 不标的话一个分析分支挂了汇总就整个跳过,其余几份做完的结论没人收。子代理报错或交了空话先按 `retries`(缺省 1 次)原地重派;被拒(名字不对、排不上队)和转后台的不重试:前者重派一模一样会再被拒,后者根本没失败
+- 节点可以声明 `output_schema`(JSON Schema):子代理必须以一段 ```json 代码块收尾,解析并校验通过才算完成,不合格按失败重试(重试的 prompt 带上不合格的原因),下游拿到的是规整过的 JSON 而不是夹在散文里的数据。声明 `map_over` 的节点是**逐项节点**:等上游交出一个数组,对每一项各派一个子代理 —— 这是一张写死的图唯一表达不了的形状(写图的时候不知道上游会列出几个模块)。上游必须声明数组型的 schema,运行前就查;项数上限 50,超出的不处理并在结果里写明
+- 入参先过一遍图校验才开跑:重名 id、自环、指不到节点、环,以及「一条边都没有」—— 后者几乎总是模型忘了给汇总节点写 `depends_on`,于是「汇总」和被汇总的分析同时开跑、交回来一份编出来的总结;真正互相独立的事不需要这张图,一轮里并发调几次 `Task` 就是同一个效果。校验放在 `shared/agent/workflow.ts`,渲染层画「入参推出来的结构」时用的是同一份
+- 对话里画成**画布**(`@xyflow/react`,懒加载 —— 没开实验开关的人一个字节都不多下):横向分层、列内竖向居中,依赖线带箭头、`allow_partial` 的边画成虚线,节点上有状态图标、耗时 / token / 重试次数与逐项进度,点开看子代理产出的前一段。滚轮交还给对话(内联画布不吃滚轮,否则鼠标划过就「卡」在这张图上),缩放留给触控板捏合与全屏。工具卡外面那行标题去掉了 —— 它与画布自己的标题栏、进度是同一件事说了两遍
+- 进度按**整份快照**推给界面(最多 20 个节点、几 KB):增量意味着渲染层要处理乱序和丢包,而进度事件本来就是可丢的。运行中那份在 `ToolProgress.workflow`(易失),结束后那份跟着转录落盘(`ToolOutput.workflow`,编码器不下发);两者都缺(旧转录、或被中断)时画布从工具入参现推一份全 `pending` 的,结构永远画得出来,只是没有状态
+- 设置 › 实验 › **运行前确认**(出厂**开**,和别的实验项相反):校验通过、派出任何节点之前,把全 `pending` 的图交给用户 —— 运行 / 要求修改(带反馈,原样转给模型)/ 取消。一张图一次就是十几个子代理的 token,开跑之前是唯一不花钱的拦截点。确认卡按**层**列清单而不是按入参顺序:用户要确认的恰恰是「谁和谁同时跑、谁等谁」
+- 只在主 run 下发:子代理里再起一张图,一次调用就可能扇出几十个子代理,而嵌套深度上限挡不住宽度
+
+**子代理排队去掉 5 分钟墙钟上限**
+
+- 子代理一跑半小时是常事,排在它后面的就得等它跑完;以前的上限会把这种正常排队报成失败(Workflow 一扇出就撞上)。不会永久挂住靠的是别的出口:父 run 中断 / 结束即取消、死锁当场拒绝、队列溢出直接拒绝
+- 顺带把节点钉模型的能力补进派发链:节点可以指定 `model`(先用可用别名表校验,派到一半才发现名字不对时前面的节点已经白跑了)与 `thinking` 档位,子 run 的用量随结果回传给父侧计账
+
+**Widget:TSX 组件、宿主能力与不重画的编辑**
+
+- `visualize_show_widget` 增加 `tsx` 格式(与 `html` / `svg` 并列;没给 `format` 时按源码推断 —— 先认 import / export default,再认 `<svg`):模型写一个 `export default function Widget()`,能 import `react` / `nextcowork/widget` / `nextcowork/charts` / `lucide-react` 这张白名单里的模块,面板类的东西(仪表盘、计算器、表单、表格、图表)用宿主自己的控件写 —— 和插件视图同一份实现、同一套色板,不在这里复制一份
+- TSX 在**主进程、工具运行期**编译(sucrase 去类型 + 转 JSX + 转 CJS),不在 iframe 里,理由只有一条:**错误要能在同一轮回到模型手上** —— 失败时模型拿到 `行:列` + 出错那一行 + 一个 `^`,而不是用户看到一块报错、模型以为自己画完了。编译产物随卡片下发,iframe 里由外壳包进 `function (require, module, exports)`;模块表按**编译产物**重新数一遍(JSX 的自动运行时会额外引 `react/jsx-runtime`,源码里看不到),没用到图表的 widget 不该为它多读几百 KB
+- 新增两个不重画的工具:`visualize_edit_widget`(照 `Edit` 的规矩做精确替换,旧串必须**恰好出现一次**或显式 `replace_all`,否则失败并说清楚 —— 不猜;产出的是一张**新卡**,上一版留在原处,改写历史里的那张卡会让「上一轮看到的图」在用户眼前悄悄变掉)、`visualize_update_widget`(只推一份新数据给同名的那张卡,`useWidgetData(initial)` 读它;数据只走卡片,不回灌给模型)
+- widget 有了一组**预先声明的宿主能力**:`copy` / `download`(走系统保存对话框,路径由用户选)/ `openFile`(只认工作区之内,`..` 跳出去的一律拒绝)/ `openUrl` / `toast` / `setState`(按 callId 持久化到 `session.widget.<会话 id>` 的 kv)/ `submit` / `draft`(把文字填进输入框,**不发送**)/ `setContext` / `runAction` / `complete`。每条通道都有长度上限,超了直接拒绝而不截断 —— 截断后的 JSON 是坏的
+- 交互模式:`visualize_show_widget` 带 `interactive: true` 时这次调用会**挂起**等 widget 里的 `submit(value)`,值作为**这一次**工具调用的结果回到模型,开不了新的一轮。只开给主 run:子代理没有人能回答它的挂起,一个等提交的 widget 在子代理里就是一次死锁。待决项(`widget_submit`)只承担两件事 —— 让 run 挂起有处可查(重载窗口后仍能恢复),以及给用户一个「不提交了」的出口
+- 动作:`actions` 在调用时就把工具名与入参定死,widget 只能选 `id` 和受约束的参数。参数只有**枚举**与**有界数字**两种,没有自由字符串 —— 参数会被代进工具入参(典型是 `Bash` 的命令行),自由字符串等于让 widget 拼命令。声明时校验 id 不重、工具不在禁用表里(会挂起等人和会派出新 agent 的一律不许)、占位符与 `params` 一一对应。非只读动作**第一次一定问**,即使工作区开着自动档:确认框由宿主画、显示真实的工具与入参,而不是 widget 自己写的文案;确认过一次的 (卡片, 动作, 绑定后的入参) 在进程内记住。结果只回到那张 widget,不进模型上下文
+- `setContext()` 发布的状态摘要挂在输入框上方,随**下一条**消息交给模型,用户看得见也删得掉 —— 那段文字是模型写的 widget 产出的,而它会以用户这条消息的名义进上下文,悄悄附上去等于让一张图替用户补了半句话。进上下文时按不可信材料包起来
+- 宿主侧加固:iframe 仍是不透明源(`allow-scripts` 而**没有** `allow-same-origin`),只信 `event.source`(不透明源发来的 `event.origin` 是字符串 `"null"`,拿它做判据等于没判),`handleCall` 逐字段收窄;动作的定义**只从转录里取**,渲染层只给 `(sessionId, callId, actionId, params)`,iframe 与渲染层都改不了「要跑什么」。`host.complete()` 走一条**独立的上游路由器** —— widget 是模型写的,一个写坏的循环连发几十次请求,它们的失败不该把正文侧的供应商标成不健康
+- widget 更像长在对话里:html / svg 边生成边长出来(高度下限从 60px 降到 24px,生成期只有一行提示,先撑出一块空白反而像「这里有张卡没加载出来」),tsx 写完一次性挂载;高度上报要把挂在 body 上的弹层也算进去(`nextcowork/ui` 的 Select / Tooltip 走 Radix portal,只量根节点的话下拉框一打开就被 iframe 下沿切掉);宿主把应用自己的 `--color-*` token 也推给 iframe,控件才会跟着换色器走;`ui.css` 的 `@source` 加上 widget 套件,否则那些 class 根本不生成
+
+**设置 › 实验**
+
+- 新增设置页「实验」,放在所有常规页之后、关于之前 —— 它不该是用户找东西时先看到的那一页。每一项都出厂关闭:打开它是用户在说「我愿意用一个还会变的东西」,这句话不能替他说;一项转正后就从这一页搬走,而不是永久留一个永远是 true 的开关
+- 目前两项:`Workflow 工作流`(关掉 = 工具不下发)、`运行前确认`(工作流关着时禁用但不藏 —— 藏起来的话打开工作流的人不知道还有它)
+- 设置项归到 `preferences` 同步档:「我要不要用实验功能」是用户的偏好,不是这台机器的事实
+
+### 修复
+
+**设备服务打包不再读产物正文**
+
+- `package:agent` 以前按正则扫 `out/agent/bin.mjs` 的正文找依赖,而这一版把 TSX widget 的写法示例(模板字符串)打进了产物 —— 示例里那句 `import { TrendingUp } from 'lucide-react'` 被当成真 import,打包于是报「bundle imports packages that package.json does not declare: lucide-react, nextcowork, react」,`Device service package` 这一步红掉,连带 `Publish GitHub Release` 被跳过
+- 改成 `build:agent` 把 rollup **模块图**里的外部包名写成 `out/agent/BUNDLE_IMPORTS.json`,打包只读那份(内建与相对路径丢掉),不再碰产物正文。顺带把子路径归一到包名(`@modelcontextprotocol/sdk/client/index.js` → `@modelcontextprotocol/sdk`)、`optionalDependencies`(cpu-features 这类可选原生模块)不再被报成「缺声明」,清单本身也随包发出
+- `--verify` 等的那行监听地址不再写死 `127.0.0.1`:`--host` 的默认值归服务定义,改了默认值不该让打包永远等下去
+
+**设备服务在 Linux 上真正过上 CI**
+
+- CI 的 `service-platforms` 矩阵补上 `ubuntu-latest`(此前只有 macos / windows,注释里那句「Linux 在 quality 里跑」说的是整仓质量检查,而 `smoke:agent` 把构建产物当真实进程跑一遍这件事从来没在 Linux 上发生过 —— 偏偏它是一大票用户自部署设备服务的目标机)。smoke 的判据从 `runner.os == 'macOS'` 改成「不是 Windows」:脚本自己会在 Windows 上跳过
+- `--data-dir` / `--node` / `--bin` 的绝对性按 `--platform` 判,不再一律按 POSIX 判:`C:\…` 混进 Linux 的 unit、`/var/lib/…` 混进 WinSW 配置、以及 `/C:/…` 这种把 Windows 路径当 POSIX 路径拼出来的伪路径,都在 plan 阶段拒掉,而不是等 systemd / 服务管理器报一个看不懂的错
+- `service-cli` 的用例分成两套:`plan` 类是**参数**用例(系统单元 / plist / WinSW 配置只由 `--platform` 决定),用不着本机临时目录,也就不该因为「在 Windows 上跑」而换成另一套分支;`apply` 类才真的落盘,用本平台的路径。上一版把整套都改成宿主平台,那三条 `plan`/`apply --root` 于是拿 WinSW 配置去断言 systemd unit,自己把自己跑红了
+- `agent-smoke` 等邀请,而不是赌它到:邀请是监听行之后的**下一次** `write`(main.ts 先报监听、再签发邀请),两行不保证在同一个 chunk 里到 —— macOS runner 上就是这么红过一次(「agent did not print an invitation」)
+- `pty-helper` 的整组用例在 Windows 上跳过:`chmod` 在 Win32 上只翻转只读位,`stat` 回来的 mode 恒是 `644 | 666 & umask`,断言执行位有没有设上、有没有被动过,在这个平台上根本表达不出来(不是断言写错了平台)。win32 分支本身留在单独一组、在 Windows 上也跑:断的是「一个字节都不许动」
+
+**发到 npm 的那一步从来没成功过**
+
+- `npm publish out/aidotnet-nextcowork-device-service-*.tgz` 里的路径被 npm 当成了 GitHub 简写(`owner/repo`),于是它去 `ssh://git@github.com/out/aidotnet-nextcowork-device-service-2.7.2.tgz.git` 取包,报 `git@github.com: Permission denied (publickey)` —— 看起来像 NPM_TOKEN / 密钥的问题,实际是**路径解析**:带上 `./` 之后同一份 tarball 直接进 `npm notice 📦` 的发布流程。v2.7.x 的发版每次都在这里断,`Publish GitHub Release` 因此一直是 skipped(它 needs 这个 job)。`BUNDLE_IMPORTS.json` 也随之进了包(装完之后仍能看出这份产物按什么清单装配的)
+
+**FTS 映射表与旧版写进来的行对账**
+
+- 映射表(`messages_fts_rowid`)之外的 FTS 行会让下一条消息**写不进去**:V37 之前的版本(例如 `/Applications` 里还没升级的那份)开同一个库时,按 message_id 删、不带 rowid 插,FTS 自增出的 rowid 全落在映射之外,新版下一次分配映射 rowid 就撞上它们,发消息直接报一句不带上下文的 `constraint failed`。新增 `reconcileMessageFts`,每次开库把映射最大 rowid 之后那一段补进映射(同一条消息既有映射又有多条新行时,映射改指向最新那行),剩下仍无映射的(消息已不在)直接删掉;分配新 rowid 前先把那个位置上的残留行腾掉
+- 只看 `rowid > 映射最大值` 那一段,而且必须按 **BigInt** 绑定:node:sqlite 把 JS number 绑成 REAL,FTS5 遇到 REAL 的 `rowid > ?` 不走 rowid 区间而是整表扫(本机库实测 220ms vs 2ms)。尽力而为:索引坏了 / 没了不能拦住开库,失败只回滚这一段
+
+**删会话时连 widget 状态一起清**
+
+- `session.widget.<会话 id>` 与 `session.input.<会话 id>` 一样是没外键的 kv,`deleteSession` / 「清空对话历史」/ 测试清库三条路径都得手删
+
+**空回复的回合不再画一个空页眉**
+
+- 回复被删光之后,`threadHistoryRows` 照旧在末尾补的那个空助手行会画出「供应商 / 模型」页眉、下面什么都没有 —— 看起来就是删除没删干净。停止 / 出错的空回合不同:那时它是「重新生成」唯一的落脚点,必须留着
+
+**任务面板并进活动胶囊**
+
+- 转录末尾那张子代理任务面板整个删掉,统一到活动胶囊那一个入口(它已经把任务清单 / 子代理 / 后台命令收在一起)
+
+### 测试
+
+- 本节新增工作流的图校验、节点状态、逐项节点与失败传播,tsx 编译与白名单、widget 格式推断与协议报文、编辑 / 更新工具、FTS 映射对账(含「旧版开过同一个库之后新消息照样写得进去」)、空回复回合等用例
+- `npm run typecheck`(node / web / plugins / controller-client)、`npm test` 通过
+
+## v2.7.1
+
+### 新增
+
+**苹果风格界面与活动胶囊**
+
+- 基准色板换成 macOS 系统语义色（浅色 `#f5f5f7` / `#1d1d1f`，深色 systemGray6→4 的阶梯），强调色两个外观都用 apple.com 的 `#0071e3` —— 白字压在系统蓝 `#007aff` / `#0a84ff` 上过不了可读性护栏要求的 4.5:1；旧的墨绿整套留在主题列表里当一档，默认档换成新的 apple。控件跟着走：菜单选中行改成强调色实底白字，各面板统一到 8px 圆角，输入框 / 按钮 / 设置与搜索面板分别抽成 `.apple-field` / `.apple-btn` / `.apple-sheet`；macOS 上窗口开 vibrancy，渲染层按 `data-vibrancy` 把窗口底和主面板改成半透明玻璃
+- 转录右上角新增活动胶囊，任务清单 / 子代理 / 后台命令收进同一个入口：原先任务清单是输入框上方那张卡片、子代理只能去转录里翻，而模型 `run_in_background` 起的后台 shell 根本没有界面，用户既看不到也停不掉。后台栏读主进程注册表（按工作区筛、不随 run 结束），`peek` 看的是与 `BashOutput` 分开记的一条尾巴（界面看一眼不会把模型还没读到的输出吃掉），停止走 `KillShell` 那条路、状态记成 `killed`
+
+**用户消息复制与设备服务的命令行发行包**
+
+- 用户气泡下新增「复制消息」：只读面板里也给（复制不改任何状态），复制的是原文（含 `@` 引用的 markdown）而不是折叠预览，成功后短暂显示对勾、失败标红可重试；展开键从整行宽的对齐色条改成一枚居中的小胶囊，悬停时不再像气泡下多出一张卡片
+- 设备服务打成可用 npm 安装的命令行包：`build:agent` 产物补上 shebang（`npm i -g` 的 bin 软链按 shebang 执行，缺了会被当 shell 脚本读），打包清单加 `bin` 与 `docs/device-service.md` 拷来的 README，装完即有 `ncw-device-service` 命令，不必自己拼 `node_modules` 路径；包名是 npm 上的 `@aidotnet/nextcowork-device-service`
+- 服务启动与 `diagnose` 探测前补 `node-pty` 的 spawn-helper 执行位：npm ≥ 12 默认不跑依赖的 install script，从 tgz 或 `npm i -g` 装出来的 `node-pty` 只剩 644 的 prebuilds spawn-helper，`pty.spawn()` 只会报一句 `posix_spawnp failed`；补不上时只警告（服务照常起）并把原因带进 `diagnose` 详情
+
+### 修复
+
+**消息搜索的 FTS 行改为按 rowid 增删改**
+
+- `messages_fts` 的 `message_id` / `session_id` 是 UNINDEXED 列，FTS5 只认 rowid 和 MATCH 两种索引，`WHERE message_id = ?` 其实是全表扫描 —— 本机 21 万条消息、约 1 GB 的索引上实测每次 0.3~0.65 秒，而它挂在每条消息落盘的同步路径上。新增 `messages_fts_rowid`（V37，普通表，message_id 唯一）把两张 id 映射到 FTS 行的 rowid，并从现有 FTS 行补齐（含同一 message_id 多行时取最近写入的那行、清掉 `messages` 里已经没有的幽灵行），不重新分词
+- 写入、删除、改名、清空与「清孤儿」收敛到 `message-text.ts` 里的唯一入口，repo 与迁移路径都只经过它；映射表建起来之前（旧库合并跑在迁移之前）自动退回旧写法，之后由 V37 补齐
+
+**设备页与用户消息的两处打磨**
+
+- 设备页补上「还没在别的机器上装服务?」那一段：三步 + 三条原样可复制的命令（与 `docs/device-service.md` 同一份），一台设备都没有时默认展开，已有设备的用户不点就不占地方；数据页把 configSync 的 `signedOut` / `invalidData` / `accountChanged` / `busy` 各自映射成文案、未知码兜底成通用失败文案，不再把 i18n key 原样丢给用户
+- 消息列表两处重算收窄：`pauseFollowing` 改成稳定引用（每次渲染换一个新函数会让历史回合的 memo 全部失效，流式期间每帧把整页回合重新协调一遍），Edit 卡片的行级 LCS 统计按入参加 `useMemo`
+- 修无上限的 LCS 比较：`line-diff` 去掉公共首尾后按两行滚动数组求长度，超过 1600 万格子退化成按行计数的多重集差 —— 数字略偏好过让渲染层或主进程同步跑上几亿次比较
+
+**用户供应商凭据不再漏给文件**（未能归类的历史修复）
+
+- `provider:<id>#<accountId>` 形式的账号密文共用 `provider:` 前缀但不归 `providers.json` 管，一律走库（NCK1）：放行的表现是写入落进 `pendingCredentials` 再也不落盘、读回来恒为 null —— 设置页旧槽显示「已登录」、账号行没有邮箱、一发消息就报「还没有配置密钥」
+- npm ≥ 12 下 `package:agent` 跑不通的两处：`npm pack --json` 返回的是按包名索引的对象而非数组；`npm run` 会把用户 npmrc 的 `allow-scripts` 导成 `npm_config_allow_scripts`，嵌套的项目级安装直接 EALLOWSCRIPTS
+
+### 文档
+
+- 新增 `docs/device-service.md`：安装（npm / Release 的 tgz）、启动参数与数据根、配对流程、开机常驻（systemd / LaunchDaemon / WinSW）、从桌面数据根原地接管、排障、自己打包；这份文档同时是 npm 包的 README，缺了直接打包失败。README 在「下载」之后加一节「运行设备服务」，模型接入改为 NextCoWork 账户渠道、移除 API Route 引导
+
+### 测试
+
+- 本节新增消息行 rowid 映射、`node-pty` spawn-helper 修复、用户消息复制、苹果色板与可读性护栏、活动胶囊与后台 shell 等相关用例
+- `npm run typecheck`（node / web / plugins / controller-client）、`npm run lint` 通过；`npm test` 519 个文件 7912 项通过（6 个文件 40 项因本机缺少原生环境跳过）
+
+## v2.7.0
+
+### 新增
+
+**设备模式:桌面连接执行设备上的独立 Agent 服务**
+
+- 新增独立设备服务 `ncw-agent`(零 Electron,要求 Node 24+):业务库、会话与 Agent 运行、工作区文件、Git、终端、MCP 等都在执行设备一侧运行,关掉桌面不再停止任务;同一数据根用独占锁保证只有一个写入者,新版桌面连接已有服务而不是再起第二个。`device-identity.json` 损坏时拒绝启动,不静默换一个新 `deviceId`
+- 新增控制端连接栈与跨语言协议(`src/shared/device`、`src/controller-client`、`src/transport/node`):握手协商协议版本与能力,请求/响应/事件按帧编码并带游标重连,写操作走幂等命令;直连优先(设备根证书钉死、双向证书认证),直连全部失败且配置了自部署中转时才走「中转承载 + 端到端握手」,中转只看得到密文,冒充不了任何一端
+- 桌面主进程接入设备注册表、Agent/终端事件桥与密钥托管:控制端私钥只进系统凭据库,设备清单(端点、证书、信任根指纹)写入 `devices.json`(0600、原子写),清单损坏时拒绝使用而不静默重建
+- 新增设备设置页与侧边栏设备切换器。配对分两步:先「检查邀请」(不联网,只读出设备指纹),用户逐位核对后主进程再校验指纹与邀请一致才配对;邀请 5 分钟内有效、只能用一次。「移除连接」只删这台电脑上保存的凭据,文案里直说不会在设备上撤销配对
+- 首版转发范围写在设备页上:设置、工作区列表/改名/关闭、文件浏览与读写、会话列表/创建/翻页、技能/命令/子代理/模式/钩子/MCP 列表、Git 查看与暂存/提交/分支,以及纯文本任务的发起、事件、停止、审批与终端;附件、子代理等其余需要设备的操作会被明确拒绝,**不会**回退到本机执行,设备离线时同样如此,重启后回到「这台电脑」
+- 共享资源(终端/浏览器/文档)用输入租约:观看不需要租约,输入必须带单调递增的 fencing token,交接或过期之后旧持有者迟到的按键与点击会被拒绝而不是插进新持有者的输入里;租约只在内存里,服务重启后全部失效,必须重新获取
+
+**设备服务的运维命令与可独立部署的发行包**
+
+- `ncw-agent diagnose [--json]`:真开一个内存库验证 `node:sqlite`、真用 `node-pty` 拉起一个 shell、真跑 `git --version`、真写一次数据目录;required 检查失败退出码为 1,浏览器与 Office 组件尚未随服务提供,如实报告 `absent` 而不是假装已安装
+- `ncw-agent service plan|apply|uninstall-plan`:生成 Linux systemd(带 `User=`)、macOS LaunchDaemon(带 `UserName`)、Windows WinSW 的安装文件与之后要执行的命令。服务以普通用户运行,拒绝 root / SYSTEM / Administrator;`plan` 只打印要写什么、之后要跑什么,从不自己 `sudo`、启动或启用服务(Windows 路径尚未实测)
+- `ncw-agent takeover begin|commit|rollback|status`:把桌面数据根**原地**交给服务,不复制、不上传。begin 先查旧进程(仍在运行就拒绝),再用 `VACUUM INTO` 做一致性备份并逐表核对行数,journal 逐步落盘所以崩溃后可从记录的阶段继续;commit 取得同根锁、创建服务身份并追加 ownership 标记;rollback 在提交前恢复备份什么都没丢,提交后必须显式 `--acknowledge-data-loss`,并先把接管之后写入的库另存一份
+- 新增 `npm run build:agent` / `build:relay` / `package:agent`:产物自检(不得引用 `electron`、必须保留 `node:sqlite`),打包只列出产物真正 import 的运行时依赖,产出 `nextcowork-device-service-<版本>.tgz`,在目标机上 `npm install --omit=dev` 即可运行,不需要桌面或仓库源码;该包与各平台安装包发布在同一个 Release 里,手动下载安装,没有自动更新通道
+
+**Grep 工具优先使用本机原生搜索程序**
+
+- `Grep` 按 `rg` > `git grep` > `grep` > JS 的优先级选择后端:大仓库不再靠内核自己遍历、逐文件读入再丢进 worker 匹配;原生程序跑在独立进程里,灾难性回溯卡住的是它自己,超时按整棵进程树杀掉,主线程不碰模型给的正则
+- 「没装 / 不认这个参数 / 方言不认这个正则 / 跑挂了」一律顺延到下一个后端,**绝不**把一次失败当成「仓库里没有」;rg 明确报出的正则编译错误会转述给模型
+- 按宿主各探测一次并缓存:本机与每个 SSH 工作区装的东西不一样,不共用一份答案;命令经用户实际的 shell 引号化,cmd 下引不了的必需参数让该后端整体顺延、可选参数丢掉靠后过滤兜底;rg 与 `git grep` 另外遵守 `.gitignore`,结果按路径排序,被截断时拿到的是一个可复现的前缀
+
+### 改动
+
+**业务能力从主进程 IPC 下沉到设备侧服务**
+
+- Agent 运行的那一半(泵与合批、启动、子 run 派发、回收与 shutdown 收尾)从 `ipc/agent.ts` 抽成 `main/services/agent.ts`,窗口那一半(授权、订阅、推给哪个 webContents)留在 IPC 层,以「安装投递端口」的方式接回去 —— 没有装端口时 run、转录与权威持久化照常,只是没有事件订阅者
+- 工作区读写/上传/范围读取、附件、会话元数据、客户端鉴权、目录浏览同样下沉为 `src/main/services`;桌面入口显式注入窗口后端、系统浏览器与登录令牌,服务进程没有这些能力时明确失败而不是假装成功
+- 新增 IPC 路由边界分类表(controller-local / device / composed):每条频道单独显式声明,并用类型做双向校验 —— 契约增删而这张表没跟上就 typecheck 报错,刻意**不提供**前缀兜底;选中设备时 `device` 类频道只能走设备,不在路由表里的明确拒绝,而不是悄悄在本机执行(那会把本机库当成「所选设备」写入)
+- 无头宿主自带 Node 侧凭据加密(程序自管的 AES-GCM,主密钥在数据根):库里若还留着桌面 safeStorage 的密文,读取时明确报错要求先在桌面迁移,不静默当成空
+- 新增设备相关数据表(控制器状态、命令、事件、交互、通知订阅、设备信任、服务 ownership 标记)与已提交输入的消费回执:回执只属于它自己的会话,且不随消息删除或转录压缩消失,保证一句用户输入只被执行一次
+- 会话输入(草稿与队列)落盘失败不再无声:首屏恢复带 `persistenceWarning` 时提示一次,运行期的 `session:inputPersistence` 事件用固定 key 推送,磁盘满时不会堆满互相覆盖的同一条通知
+
+### 测试
+
+- 新增设备协议向量、Gateway 握手与限流、RPC 方法、租约与 fencing、终端、配对证书、中转、迁移接管、无头宿主、原生 grep 后端等测试;`src/agent`、`src/transport`、`src/relay`、`src/controller-client`、`src/shared/device`、`src/main/migration`、`src/main/db` 另在三个系统上单独跑一遍(Windows 目前是信息性检查)
+- `npm test` 524 个文件 7939 项中 7899 项通过(40 项因本机缺少原生环境跳过),`npm run typecheck`(node + web + plugins + controller-client)、`npm run lint`、`npm run test:agent-build`(15 项)、`npm run test:release`(5 项)通过
+
+## v2.6.1
+
+### 新增
+
+**Opper 与 API Route 供应商预设**
+
+- 新增 Opper 聚合供应商，支持 OpenAI Chat Completions、Responses 与 Anthropic 三种协议；模型可使用池化短名自动选路，也可用 `provider/model` 固定线路，填写 API Key 后可拉取模型列表
+- 新增 API Route 预设，使用 `https://global.api-route.com/v1` 的 OpenAI Chat Completions 接口；按密钥权限拉取并导入模型，保留上游返回的完整模型 ID，不添加厂商前缀或预填过期模型目录
+
+### 改动
+
+**用户供应商配置迁移到 `providers.json`，支持外部编辑热加载**
+
+- 用户添加的非托管供应商、模型别名与凭证改存到应用数据根目录的 `providers.json`，供应商与模型按 ID 组织，便于本地网关、脚本或手动编辑接入；托管 `nextcowork` 供应商仍留在数据库中
+- 首次迁移前生成 `nextcowork.pre-providers-file.db` 整库快照；已有文件只补缺失供应商，不覆盖已有条目，确认供应商已写入后再清理旧库记录；无法解密的凭证保留原密文，迁移失败时本次启动继续使用数据库
+- 通过目录监听与 5 秒轮询拾取外部修改，兼容编辑器的临时文件替换写法；写入前重读磁盘，保留未改动条目的内容，文件解析失败时保留上一份有效配置并拒绝覆盖写入
+- 外部变更刷新模型界面，但不因临时删除条目而永久改选默认模型；文件模式不再自动补回未配置的内置上游及对应默认模型
+- **凭证存储变化**：该文件包含明文 API Key，OAuth / 签名凭证以明文对象保存，应按敏感文件保管；写入时设置 `0600` 权限（受平台和文件系统支持限制），托管供应商凭证仍沿用数据库加密存储
+
+### 修复
+
+**Anthropic 思考档位与旧 Token 预算兼容**
+
+- 更新适用 Claude 型号的 adaptive thinking 声明，按模型能力发送 `thinking.type=adaptive` 与 `output_config.effort`；未收录的新版 Claude ID 采用保守推断，不猜测是否支持关闭思考
+- 旧目录中未改动的预算配置随新版目录采用 adaptive 档位，保留用户手动预算与显式覆盖；必须使用 adaptive 的型号在读取和发送时转换，不改写已保存的预算，Claude 4.5 / 4.6 的手工预算继续可用
+- 思考选择器与请求适配共用实际供应商协议和有效档位；保留预算裁剪前的原始档位选择，仅有旧预算参数的调用换算为受支持的强度，避免界面选择与实际请求不一致
+- 仅在型号确认支持时提供关闭思考，关闭时清除残留的 `output_config.effort`；模型配置编辑器同步拦截不兼容的默认关闭设置
+- 定时任务按目标模型归一化思考档位，不再直接套用模型不支持的工作区默认值，且不改写工作区设置或已保存的模型配置
+
+**后台子代理汇报送达确认与会话历史恢复**
+
+- 后台汇报只有收到同一消息 ID 的 `message_commit` 才标记已送达，不再把入信箱或启动成功当作完成；运行正常结束但尚未消费的报告按原顺序优先重投，停止、报错或启动失败则退回待处理，避免误报已汇报或擅自续跑
+- 「回传中」只作为运行期状态，未确认前持久化为待处理，兼容重启后重试旧版遗留状态；迟到的子代理结束事件、快照重放和工具回执不再覆盖已有汇报状态
+- 历史回填按共同消息 ID 合并并保留早期页的位置，不按时间戳重排；恢复期间新加载的早期消息不会丢失，快照中的页外旧提交也不会被追加到对话末尾
+- 新运行广播先于旧运行结束事件到达时，及时接管活动运行并重置事件游标，避免继续恢复旧运行或沿用上一轮的临时状态
+
+### 测试
+
+- 新增供应商文件存储、数据库迁移与 API Route 配置测试；补充 Anthropic 目录继承、旧预算转换、协议边界、关闭思考及定时任务档位归一化回归用例
+- 补充后台汇报提交确认、未消费报告重投、崩溃后重试、汇报状态重放，以及历史分页位置与新旧运行交接的回归测试
+- 相关 16 个测试文件共 **648 项通过**，`typecheck`（node + web + plugins）与 `test:release`（5 项）通过
+
+## v2.6.0
+
+### 新增
+
+**界面基础组件与设置页体验升级**
+
+- 新增可组合的 `Collapsible` 组件，统一标题、折叠区域、键盘操作与无障碍语义；菜单、选择器、文本输入框和多行输入框同步完善组件能力
+- 模型、连接、导入、用量等设置页面迁移到更新后的组件规范，模型配置结构和信息层级更清晰
+- 聊天记录加载状态拆为独立的 `ThreadLoading` 组件，提供与正文布局一致的骨架屏及明确的失败重试入口
+
+### 改动
+
+**长会话历史加载与运行中会话恢复更稳定**
+
+- 历史分页在数据库侧批量扩展到完整轮次，避免长轮次逐条查询；消息与运行记录只按当前页关联，减少无关扫描
+- 打开运行中的会话时先合并已持久化历史，再接入实时快照，避免恢复期间历史暂时消失、重复读取或用量重复计算
+- 历史读取失败不再被误判为空会话：界面保留错误状态并允许重试；加载成功、会话确实不存在和用户新发消息三种状态分别处理
+
+**菜单、输入区与主题样式统一**
+
+- 菜单和子菜单改用独立的浮层底色与阴影，移除不必要的高对比描边，并统一模型菜单、账户菜单、提及和 Skill 弹窗的视觉表现
+- 调整聊天输入区布局及交互细节，减少组件间样式分叉
+
+### 修复
+
+- OpenAI Responses 推理回放只回传 1–64 字符的有效推理 ID；过长或空 ID 不再导致后续请求持续返回 400，文本型推理载体仍可正常回放
+- 修复历史加载与实时事件竞态时旧快照覆盖新消息、子代理恢复时历史缺失，以及活动 run 恢复过程中重复发起历史请求的问题
+- 修复长轮次历史分页边界和 `messageRuns` 全会话扫描带来的性能问题
+
+### 测试
+
+- 补充 OpenAI 推理 ID 边界、历史分页批量扩展、历史读取失败重试、活动会话恢复与聊天加载状态等回归测试
+- 相关 78 项测试通过，`typecheck`（node + web + plugins）通过
+
+## v2.5.5
+
+### 新增
+
+**前台命令与前台子代理可以「转为后台运行」:不杀、不重来,只是不再等**
+
+- `Bash` 工具卡在命令跑动期间多一颗「转为后台运行」按钮(新通道 `shell:backgroundToolCall`):命令**不被杀**,这次工具调用当场返回「到目前为止的输出 + 一个 shell id」,命令作为后台 shell 继续跑、超时不再适用,模型之后用 `BashOutput` / `KillShell` 管它。`SpawnFn` 新增 `detach` 信号与 `SpawnResult.detached`,`nodeSpawn` 在转走时摘掉自己的 data 监听、显式 `pause()` 两条管道,由 `agent-shells.ts` 收编时 `resume()` —— 转走那一刻到收编之间到达的输出不会丢
+- 按钮是否出现由**这一次调用**自己报的 `ToolProgress.detachable` 决定,不是按工具名:只有本地环境能收编进程(`ShellBridge.adopt` 仅本地提供),SSH 上不画这颗按钮,而不是画一颗按了没反应的。后台名额(`MAX_RUNNING`)已满时**当场拒绝**、前台照旧在等,不会先转走再在收编时失败;收编失败则杀掉进程再报错,不留孤儿
+- 回给模型的措辞写明三件事:是**用户**转的、它**还在跑**、怎么读 / 怎么停 —— 避免把「到目前为止的输出」当完整结果去下结论
+- 子代理卡片同样有「转为后台运行」(新通道 `agent:backgroundSubagent`):父代理那次 `Task` 调用不再等它、当场返回,子代理继续跑,结论之后按后台子代理那条路送回主代理。`monitorChildRun` 改为在**结束那一刻**读可变的 `mode`,被转走的子代理按后台收尾;只认还在 `running` 的 run,避免 run_end 已发出、收尾读过 `mode` 之后再转造成「卡片说后台、结论按前台交回」。工具回执明确告诉模型「不要再派一次」
+
+**Git 面板与「改动审查」换成 CodeMirror 对比视图:行内 / 并排、折叠、横向滚动**
+
+- 新 `CodeDiffViewer`(基于 `@codemirror/merge`):行内(unified)与并排(split)两种布局,折叠未改动的上下文,行号栏不随横向滚动走;并排模式改为每边各自滚动、两边同步,横向滚动条不再埋在文档最底部。语法高亮与聊天里的代码块共用同一套配色。聊天工具卡里的小 diff 仍用轻量的 `DiffLines`,不被拖进 CodeMirror 的 chunk
+- 新通道 `git:getDiffSides`:取一份 diff 两侧的**完整文本**。比较基准与 `git diff` 一致(工作区看「暂存区 → 工作区」,暂存区看「HEAD → 暂存区」);用 `cat-file blob` 读对象(不走 textconv),符号链接读链接本身而不跟进目标;新文件 / 已删除 / 空仓库那一侧为空串。二进制、单侧超过 1MB、冲突中、子模块返回 `null`,界面退回 unified 文本。只改文件模式、两侧正文一致时显示「无差异」
+- 抽出 `resolveInRepo`:`readUntracked` 与新增的工作区读取共用同一条越界拦截
+
+**外层标签栏:键盘可操作,视觉重做**
+
+- 底层换成 Radix `Tabs`(Root / List / Trigger):tablist 语义、roving tabindex、←/→/Home/End 移动焦点;`activationMode="manual"`,方向键只挪焦点、Enter / 空格才切换,不会扫一遍就把所有工作区依次打开。补上 Delete / Backspace 关闭、F2 改名、菜单键 / Shift+F10 打开右键菜单;键盘关闭后焦点落回原位置的那张
+- 激活 Tab 底部两侧加反向圆角,和画布连成一体;两张未激活 Tab 之间画分隔线;尾部只留一个槽(激活 Tab 平时是 ×、运行中是转圈、悬停 / 聚焦时换成 ×),未激活 Tab 的 × 悬停时压在尾部并带渐隐,不再常驻留 18px 空白
+
+**聊天里可以单独删掉一整轮**
+
+- 用户提问气泡新增删除键(`onDeleteTurn`),提问连同它引出的回复一并删除;只读的子代理面板不画
+
+### 改动
+
+**Arc 组件库全面接入**
+
+- 新增 `components/arc/`(Radix 底座):action-button、button、context-menu、dialog、dropdown-menu、empty-state、input、number-field、progress、radio-cards、search-field、segmented-control、select、slider、switch、textarea、toast-stack、tooltip,附 `foundation.css` / 动效 token 与 `components.json`;新增依赖 `@radix-ui/react-{dialog,dropdown-menu,select,switch,tooltip}`、`@codemirror/merge`、`@fontsource-variable/{geist,inter}`
+- 设置页、扩展、文件、Git、技能、计划任务、奖励等视图的按钮 / 开关 / 分段控件 / 空态 / 弹窗改用 Arc;`ui/Dialog` 保留为薄封装,集中处理 `app-no-drag`(标题栏拖拽区会吞掉 pointer 事件)、z 轴(模态 100,Radix 浮层统一抬到 150)、Esc 只关最上一层、按内容给宽度这四条对 49 个调用点都成立的约束;`ui/Segmented` 只为插件 API(`nextcowork/ui`)保留旧签名,宿主代码直接用 Arc 的 `SegmentedControl`
+- 模型选择菜单(`ProviderModelMenu`)改用 Radix `DropdownMenu` 的 Sub / SubTrigger / SubContent,解决四个老问题:斜着移向子菜单时扫过别家供应商导致子菜单跳变(Radix 有指针安全区)、没有方向键导航、二级面板定位与翻转靠手写、二级面板压不过 z-100 的设置浮层。输入框模型药丸、默认模型 / 默认子代理、图片模型、视频模型共用
+- 每回合的用量行刻意**不**用 Arc 的 Tooltip(每个实例自带 Radix Provider,200 回合长历史渲染耗时翻倍),继续用只在悬停时才挂浮层的轻量版
+
+**长会话打开更快**
+
+- 首屏只读最近 60 条(`HISTORY_INITIAL_PAGE_SIZE`),翻页仍为 200;滚到顶由哨兵自动接着取。新增 `historyLoaded`:首页读回来之前画骨架,不再把空转录当成「全新会话」闪出问候语 + 居中输入框;读失败、会话已删除、新铸出的会话都算「读过了」,骨架不会一直挂着
+- 目标重载恢复只读「最后一条带 `goal_status` 的助手消息」(`lastGoalStatusMessage`:先用 LIKE 在原文上筛候选、再解析确认),不再把整段转录 `JSON.parse` 一遍;`restoreGoal` 的历史改为**只在第一次**才读 —— 原先写成默认参数,已初始化的会话每次 `sessions:getPage` / `goal:get` 也白读一遍再丢掉
+- 离屏会话 store 的释放宽限从 20 秒缩到 8 秒
+
+### 修复
+
+- 删除 / 重新生成把末轮回复删掉后,会话状态复位为 `done`:之前被删掉那一轮留下的「已停止 / 出错」会继续挂在状态行上;只剩一条未回复的提问时,状态行不再显示一句不存在的回复的「已完成」(停止 / 出错照常显示)
+- 设置里子代理并发数的说明文字去掉了只有本仓库看得懂的「方案 §4.9」引用
+
+### 测试
+
+- 新增 3 个测试文件:`git-diff-sides`、`provider-model-menu`、`outer-tab-bar`;补充 `bash-background`、`host-spawn`、`agent-shells`、`task-tool`、`goal-runtime`、`roundtrip`、`subagent-queue-wiring`、`history-paging` 等用例;更新说明弹窗的测试显式声明 jsdom 环境(Radix 的 `useLayoutEffect` 在 import 那一刻判断 `document`)
+- 全量套件 **7159 项通过**(29 skipped),零失败;`typecheck`(node + web + plugins)通过
+
+## v2.5.4
+
+### 新增
+
+**视频生成:15 家预置供应商,对话里一句话发起,后台排队、轮询、下载、播放**
+
+- 设置 → 模型新增「视频模型」页(`VideoModelPage`):按 `video-provider-presets.ts` 的 15 个预置填地址 / region / 输出桶,从 `video-profiles.ts` 的 26 条「供应商 × 型号 × API 版型」里选型绑定;接通 12 条上游线路 —— Google Veo、xAI Grok Imagine、火山方舟 Seedance、阿里百炼 Wan、MiniMax 海螺、智谱 CogVideoX/Vidu、Runway、Luma 新旧双线、fal.ai 队列、Replicate、AWS Nova Reel(Bedrock + S3)。可灵、硅基流动、腾讯混元三个预置可见但动作表还是空的,不可选 —— 不让你配出一个必然失败的模型;托管供应商拒收传入的视频路由,绑定失效时自动清空选中
+- 对话里只有一条入口:`generate_video` 工具(动作 generate / image / frames / edit / extend,加 status / cancel 查询),提交立即回执,生成在后台走完 —— 轮询间隔从 5 秒起,每运行 1 分钟加 5 秒,封顶 30 秒
+- 腾讯 TC3-HMAC-SHA256 与 AWS SigV4 用 `node:crypto` 手写,不引 SDK,官方测试向量锁进单测(`upstream/video/sign.ts`);`validate.ts` 在发请求**之前**同步拦截:动作不在该型号的动作表、时长 / 比例 / 分辨率 / seed 不在合法集合、frames 缺帧、edit / extend 引用非公网 URL,一律不发 —— 防的是上游「静默忽略参数」「自动升档计费」「异步才报 400」这三种最难受的失败
+- 任务**先落库再发付费请求**(`video_generation_jobs` 表,会话外键级联删除);双轨状态机:cloud(submitting / unknown / queued / running / succeeded / failed / canceled)× retrieval(waiting / downloading / ready / retryable_error / expired / paused)。提交应答丢失标 `unknown`,**绝不自动重发**;查询失败标 `retryable` 续轮;凭据指纹变了标 `paused`;应用重启后 resume 只查询不提交
+- 下载流式落盘 + SHA-256 + 容器魔数校验(ftyp / EBML):HTML 错误页不会被存成 .mp4;`.part` 临时文件加原子 rename,单视频上限 512 MiB(独立于附件 32 MiB);重定向跨源丢弃鉴权头。产物登记为会话附件,消息里是 `ncw://` 地址
+- 每个 job 冻结下单时的 provider / profile / 模型 / 连接与凭据指纹快照(fal 的 endpoint route 段一并落库):之后换绑定不影响旧任务的查询与取回;「重试取回」只下载不重新生成
+- 渲染层:任务卡片(`VideoGenDetail`)在消息流里播放、取消、重试取回;「另存为」走系统保存对话框由主进程复制,失败清理残留文件。`save_video` 工具把视频流式写进工作区,已存在默认不覆盖;读回校验本会话归属加 realpath 围栏,别的会话拿不走
+- IPC:`video:listBySession` / `video:get` / `video:cancel` / `video:retryRetrieval` / `video:saveFile`,状态变化 `video:jobChanged` 广播到全窗口,均按会话过滤
+
+**历史消息分页:长会话只读最近一页,上翻按整轮补齐**
+
+- 新 `sessions:getPage`(`{sessionId, limit, beforeMessageId?}`,配套 `getSummary` / `lastAssistant`,都不读整段转录):打开会话只取最近 200 条,顶栏「加载更早的消息」按钮加滚到顶自动前翻,以当页首条 id 作锚点;取页时再向前补到最近一轮的开头(上限 500 条)—— 页首必须是可见提问,否则配对的 tool_result 找不到它的 tool_call
+- 长历史渲染隔离:历史行与分组只依赖 `messages`,流式 token 只重算 live 尾行与末轮分组 —— 200 回合的会话里每个 token 的历史构造与分组调用数为 0,不再逐 token 重算全部历史、越长越卡
+- 「⋯」菜单从只能删整轮改为可删单条助手回复(`sessions:deleteReply`),提问保留
+
+**消息编辑与重新生成:改文字不碰附件,重新生成按当前档位另起**
+
+- 编辑提问只替换可见文字、保留附件,并清空该轮的 token / 上下文占用读数;「重新生成」删除该提问及之后全部,按用户**当前**模型档位另起新 run;留下的消息重建工具卡片,不退回「生成中」
+- 编辑规则收在 `shared/agent/history-edit.ts`,主进程(改完整历史)与渲染层(只改本页显示)共用同一条:按「跨度」删,吃掉配对的 tool_result,不产生 Anthropic 拒收的孤儿调用 —— 渲染层手里只有一页,整段 replaceHistory 会误删页外消息
+- 旧转录里的 base64 内联图(单张可达 10MB+ 字符)在读页时按需转存为会话附件(每次 ≤12 张 / 32MB,会话忙时跳过),模型看到的字节不变(`inline-images.ts`)
+
+**Grep 正则隔离执行池:模型的正则不再在主进程里编译**
+
+- `grep-regex.ts`:模型给的正则只在 `eval` worker 里编译匹配,redos 静态筛查先快拒一道;真实墙钟 5 秒到期直接 terminate 整池,已得结果带超时说明返回。限额:单文件 5MB、每池 2 worker、进程级 4 池、排队 16、worker 堆 256MB —— 灾难性回溯最多烧掉一个 worker,不再是整个应用的卡死
+
+**附件缩略图与视频拖进度条**
+
+- `ncw://…?preview=thumb` 返回长边 768px 缩略档,缓存在数据根 `thumbnail-cache/`(不进附件表、不进备份),256MB 预算按 mtime 淘汰,生成失败回原图 —— 几十张原尺寸截图逐张全尺寸解码拖慢对话渲染的问题到此为止
+- 附件协议自实现单区间 Range(206 / 416、闭合 Content-Range、后缀区间、HEAD 无 body):原先 `net.fetch(file://)` 不转发 Range 头,每次都全量 200 —— 视频能播,但拖不动进度条
+
+### 改动
+
+**会话运行时移入主进程:窗口不在看,续跑、汇报、排队照常**
+
+- 新 `session-runtime.ts` 成为「这条会话下一轮何时开跑」的唯一决定者:草稿与队列落盘(同一键防复活)、run 正常结束后续跑排队消息、插话信箱、后台子代理结果汇报、目标空闲检查投递。之前这些全靠渲染层收到 run_end 后再发 send —— 窗口切走、最小化或重载中,一件都不会发生;渲染层也不再被迫常驻每个会话的全部转录
+- 队列改为主进程镜像:发消息时对方忙则入队(`session:queue`)而非报错;新通道 `agent:unwatch`、`session:reportBackground`;`agent:run` 返回 `{started}` 或 `{started:false, queue}`,支持 `launchDetachedRun` 不订阅窗口
+- 会话互斥(`sessionOperations` + `SessionBusyError`):同一会话的 run 与上下文压缩互斥,续跑入口移到 driver finally 释放互斥之后,不再赌 run_end 的时序;删除会话前检查递归子树里是否还有在跑的 run
+- 后台事件有闸:窗口隐藏时 rAF 不派发,事件泵按 256 条 / 100 万字符 / 50ms 兜底定时器三道预算放行,超限走平常 drain 不丢信封 —— 后台 run 事件无限积压撑爆渲染进程、恢复可见时卡死的问题
+- 离屏会话放得掉:视图引用计数,最后一个视图离开 20 秒宽限后丢弃 store(只摘正文订阅,run 照跑);`shell-port.ts` 消除 tabs ⇄ window 两个 store 的直接互引,`document-saves.ts` 登记在途文档保存;`activeRuns` 广播带上 `pendingInteractions`(含子代理审批)驱动全局「等你处理」;run 日志加 16MiB 预算,已结束 run 按 TTL 2 分钟 / 总量 64MiB 回收(挂起交互钉住不回收)
+
+**上下文压缩:压缩前占住会话,完成后校验冲突**
+
+- 压缩前占住会话,期间新 run 与二次压缩均被拒;摘要完成后校验配置作用域、工作区与整段历史 revision,任一变化即报「摘要期间会话内容已变化」,不落过期的压缩边界
+
+**插件 RPC:调用钉进工作区作用域,取消是真取消**
+
+- `resolveCallScope` 把每次插件调用钉到产生它的那次工具调用的工作区,`workspace.*` / `process.exec` / `scm.*` / `storage.workspace` 按此作用域判权;插件 API 加可选 `callId` 参数,版本仍为 0.3.3,旧插件不受影响
+- 插件被禁用、卸载或 shutdown 时,在途的 `net.fetch` 与 `execStream` 被**真正 abort**;deadline 到点与用户取消用不同的 abort 原因区分;越过副作用点之后的取消回报 `result_unknown`,插件不会误以为可以安全重试
+- `net.fetch` 改 `redirect:'manual'` 逐跳重过 URL 门(≤5 跳,跨 host / 内网跳转拒绝),正文按字节截断,响应头条数与单条大小设限;审批(等人)回来后复核调用仍然存活,迟到的批准不会再 spawn 进程
+- 工具审批策略抽成 `kernel/approval.ts` 工厂:联网开关 → 本地 deny → ask → 档位 → allow → AI「为我批准」审核器 → 弹窗,审核失败回退人工
+
+**SSH 内置客户端:主机密钥指纹验证,不再来者不拒**
+
+- 原 `hostVerifier` 恒为 true,任何服务器都被信任;现按「连接 + host:port」把 SHA256 指纹 pin 进 secrets,指纹不匹配 fail closed 且不发送密码;`supports()` 收紧,identityFile / proxyJump 不再静默降级成密码认证;askpass 按连接尝试整批撤销问答;sftp 增加 32KiB 分块 `writeStream`
+
+**备份与统计移出主进程**
+
+- 备份移入 worker 线程:先 SQLite `backup()` 在线快照,再流式打成 ZIP(临时文件加原子 rename),清单计数 / 散列 / settings 全部读自快照本身,主进程不再把整库读进内存;归档格式不变,旧备份照常恢复。自动备份只保留最近一份,手动备份永不清理;`storage:getStats` 改有界扫描(20 万条目预算);恢复 / 清理增加「会话操作占用」拦截
+- 数据库事务所有权重构(AsyncLocalStorage + `DatabaseBusyError`),同步 / 异步事务互斥排队;导入改单事务加凭证回滚;FTS 可搜索正文统一由 `message-text.ts` 产出,迁移 v29 全量重建索引,v28 新增视频任务表
+
+**浏览器截图改存会话附件**
+
+- 截图落为会话附件(`ncw://`),不再把整张 PNG base64 塞进转录,保存失败才回退内联;生图侧:腾讯 TC3 / AWS SigV4 签名凭证配在生图模型上时给出明确「生图不支持」,不再报难解的 401
+
+### 修复
+
+**定时任务间隔超约 24.8 天立即误触发**
+
+- `setTimeout` 超 2³¹−1ms 会被 Node 归零成 1ms,「每周」的调度变成立刻连发;改为封顶分段唤醒;执行时钉住会话,防止执行中途被可见性回收提前释放
+
+**删除 / 改名文件不再与在途文档保存竞态**
+
+- 文件管理器删除、改名、移动前等待该路径的在途文档保存落定 —— 之前可能删除之后旧内容又被写回;远端工作区「在文件管理器中显示」改落到本机文件树定位
+
+**依赖环显式锁死**
+
+- `scheduled/refresh.ts` 断开 bridge → scheduler → runtime 的依赖环,`imports/managed-paths.ts` 与 `skill-port.ts`(Skill 触发遥测端口)同为断环继电器;新增 `architecture.test.ts` 用 AST 锁 import 边:shared 不反依赖 main / renderer,renderer 不依赖 Electron / Node,runtime 零 Electron / IPC 直接依赖,kernel 不依赖 db / store,并钉住本次解掉的 5 条环
+
+### 测试
+
+- 新增 22 个测试文件:视频生成的上游 adapter / 签名向量 / 请求校验与任务管理器、任务卡片与模型设置页;会话运行时(无窗口时续跑、插话、子代理汇报)、RPC 作用域与迟到审批与 deadline 取消、Grep 正则池超时;历史取页与渲染层前翻、事件泵预算、离屏会话释放、长历史渲染隔离;Range 协议、缩略图缓存、内联图片转存、SSH 主机密钥与 askpass 撤销、定时器超长间隔、上下文压缩冲突、文件操作等在途保存;以及锁 import 边的架构测试
+- 全量套件 **7129 项通过**(29 skipped),零失败;`typecheck`(node + web + plugins)与 `test:release`(5 项)通过
+
 ## v2.5.3
 
 ### 新增

@@ -29,31 +29,37 @@ import { ulid } from '../../../../shared/util/id'
 import { cancelWorkspaceUpload, completeWorkspaceUpload, listSessionAttachments, pickAttachments, prepareWorkspaceUpload, removeAttachment, uploadFile } from '../../services/attachment'
 import { connectionErrorKey } from '../../services/connections'
 import { Dialog } from '../../components/ui/Dialog'
-import { Button } from '../../components/ui/Button'
+import { Button } from '../../components/arc/button/button'
 import { updateWorkspace } from '../../services/app'
-import { sessionStore, resumeQueue } from '../../stores/session'
+import { sessionStore, resumeQueue, retainSessionView } from '../../stores/session'
+import { useVideoJobsStore } from '../../stores/video-jobs'
 import { Composer, type ComposerValue, type ConversationUsageSummary, type FallbackModel } from './Composer'
 import { type TrayItem } from './AttachmentTray'
 import { deferAttachIntent, takeAttachIntents } from './draft-handoff'
 import { PendingQueue } from './PendingQueue'
-import { TaskChecklist, type TaskChecklistExecution } from './TaskChecklist'
+import { type TaskChecklistExecution } from './TaskChecklist'
+import { ActivityCapsule } from './ActivityCapsule'
 import { Thread } from './Thread'
+import { ThreadLoadError, ThreadSkeleton } from './ThreadLoading'
 import { SubagentLiveFeed } from './subagent-live'
 import { SubagentOpenProvider } from './subagent-open'
 import { ToolStopProvider } from './tool-stop'
 import { openFileReference } from './file-reference-actions'
 import { WorkspaceFileProvider } from './workspace-file'
-import { stopToolCall } from '../../services/shell'
+import { WidgetHostProvider, type WidgetHostContextValue } from './widget-host'
+import { backgroundToolCall, stopToolCall } from '../../services/shell'
 import { useModelsStore } from '../../stores/models'
 import { useTabsStore } from '../../stores/tabs'
 import { useWindowStore } from '../../stores/window'
 import { WorkspaceMarkdownProvider } from '../../components/markdown'
-import { branchSession, createSession, getSession, setSessionMode, setSessionModel } from '../../services/sessions'
+import { branchSession, createSession, getSessionSummary, setSessionMode, setSessionModel } from '../../services/sessions'
 import { clearGoal, getGoal, setGoal } from '../../services/goal'
 import { parseGoalCommand } from '../../../../shared/domain/goal'
 import { toast } from '../../stores/toast'
 import { skillExtractionErrorKey, startSkillExtraction } from '../skills/skill-extraction'
 import { resolveMaxOutputTokens, type SendOptions, type SessionMode } from '../../../../shared/agent/run-request'
+import { useSuggestTrigger } from './suggest-trigger'
+import { mentionedFilesOf } from './ghost'
 
 // 需求:空会话首屏问候按当前语言显示。切点(几点算「晚上」)是 shared 纯函数
 // (dayPartOf),句子住 i18n —— 原先句子硬编码在 shared 里,英文界面下也一直是中文。
@@ -106,26 +112,38 @@ export function ChatView({
   const storeKey = sessionId ?? tabId
   const remote = !isLocalEnvironment(workspace.environment)
   const useSession = sessionStore(storeKey)
-  const { activeRunId, lastSeq, transcript, queuedInputs, compacting, compactError, lastOptions } = useSession(useShallow((state) => ({
+  /*
+    这个视图挂着,这条会话的转录就留着;卸载(切走 / 关掉)之后宽限一小段时间再放,
+    run 照常在主进程跑 —— 见 `retainSessionView`。
+  */
+  useEffect(() => retainSessionView(storeKey), [storeKey])
+  const { activeRunId, lastSeq, transcript, queuedInputs, compacting, compactError, lastOptions, historyHasMore, historyLoaded, historyError, loadingEarlier } = useSession(useShallow((state) => ({
     activeRunId: state.activeRunId,
     lastSeq: state.lastSeq,
     transcript: state.transcript,
     queuedInputs: state.queuedInputs,
     compacting: state.compacting,
     compactError: state.compactError,
-    lastOptions: state.lastOptions
+    lastOptions: state.lastOptions,
+    historyHasMore: state.historyHasMore,
+    historyLoaded: state.historyLoaded,
+    historyError: state.historyError,
+    loadingEarlier: state.loadingEarlier
   })))
   const {
     stop,
     promoteInput,
     editInput,
     editMessage,
+    deleteReply,
     deleteTurn,
     dropInput,
     moveInputToDraft,
     retagQueuedPermission,
     retagQueuedMode,
-    compactContext
+    compactContext,
+    loadEarlier,
+    retryHistory
   } = useSession.getState()
   const providerById = useModelsStore((s) => s.providerById)
   const openMarkdownFile = useCallback((path: string) => {
@@ -195,6 +213,19 @@ export function ChatView({
    *   否则用户只看到一句触发语,不知道材料从哪来、会写到哪去。
    */
   const [skillSourceId, setSkillSourceId] = useState<string | null | undefined>(undefined)
+  /*
+    ★★ 视频任务要**主动拉一次**:那张卡片靠任务状态显示进度与播放器,而状态
+    有两个来源 —— 实时的 `video:jobChanged` 与这里的初次加载。只订阅实时的话,
+    ⌘R 重载、换窗口、或者在一个**已经完成的**任务上重新打开这条会话,卡片会
+    停在"生成中" —— 因为那条广播早就过去了,而任务其实早就好了。
+
+    ★ 与 `getSession` 那几条并列而不是塞进它们的 then:视频任务与"这条会话用什么
+    模式/模型"无关,失败也不该影响那两样。
+  */
+  useEffect(() => {
+    if (sessionId === null) return
+    void useVideoJobsStore.getState().load(sessionId)
+  }, [sessionId])
   useEffect(() => {
     if (sessionId === null) {
       setCurrentSessionMode(workspace.settings.defaultMode)
@@ -202,7 +233,8 @@ export function ChatView({
       return
     }
     let cancelled = false
-    void getSession(sessionId).then((detail) => {
+    // 只要元数据:不为读一个模式/模型把整段转录读过来
+    void getSessionSummary(sessionId).then((detail) => {
       if (cancelled) return
       setCurrentSessionMode(detail.session.mode)
       setSkillSourceId(detail.session.skillSource?.sessionId ?? null)
@@ -312,6 +344,21 @@ export function ChatView({
     [contextAlias, maxOutputTokens, workspace.settings.maxContext]
   )
   const started = hasRun(transcript, running)
+  /*
+    输入框「建议下一步」的触发:这个挂载亲眼看着一轮成功跑完(规则与理由见 `suggest-trigger.ts`)。
+    ★ 判定放在这里而不是 Composer:队列、目标、模式、提炼会话这些事实都住在 ChatView。
+  */
+  const suggestTrigger = useSuggestTrigger({
+    running,
+    runEndedAt: transcript.runEndedAt,
+    status: transcript.status,
+    queued: queuedInputs.length,
+    goalActive: goal !== undefined,
+    planMode: sessionMode === 'plan',
+    skillSourceId,
+    sessionId
+  })
+  const mentionedFiles = useMemo(() => mentionedFilesOf(transcript.messages), [transcript.messages])
   const conversationUsage = useMemo(
     () => summarizeConversationUsage(transcript.runUsage, transcript.usage),
     [transcript.runUsage, transcript.usage]
@@ -333,7 +380,7 @@ export function ChatView({
   const onBranchTurn = useCallback(async (userMessageId: string) => {
     if (sessionId === null) return
     const tabTitle = useTabsStore.getState().stateOf(workspace.id).tabs.find((tab) => tab.id === tabId)?.title.trim() ?? ''
-    const sourceTitle = tabTitle !== '' ? tabTitle : (await getSession(sessionId)).session.title
+    const sourceTitle = tabTitle !== '' ? tabTitle : (await getSessionSummary(sessionId)).session.title
     const branched = await branchSession(sessionId, userMessageId, t('session.branchTitle', { title: sourceTitle }))
     useTabsStore.getState().openSession(workspace.id, branched.id, branched.title)
   }, [sessionId, tabId, workspace.id, t])
@@ -363,12 +410,39 @@ export function ChatView({
     ★ 失败静默:唯一的失败是「这条命令刚好在点击的同一刻结束」,而那时用户
       想要的结果已经达成,弹一条错误只会让人以为出了别的事。
   */
+  /*
+    需求:对话里的 widget 能把文字填进输入框、给下一条消息附上它的状态、打开工作区文件。
+    ★ 草稿 Tab 还没有会话 id 时不给 —— 那时对话里也不可能有 widget(它是一次 run 的产物)。
+  */
+  const widgetHost = useMemo<WidgetHostContextValue | undefined>(() => {
+    if (sessionId === null || sessionId === undefined) return undefined
+    const target = sessionStore(sessionId)
+    return {
+      sessionId,
+      workspaceRoot: workspace.rootPath,
+      draft: (text) => { target.getState().appendDraft(text) },
+      setContext: (key, title, text) => { target.getState().setWidgetContext(key, title, text) },
+      openFile: openToolFile
+    }
+  }, [sessionId, workspace.rootPath, openToolFile])
+
   const stopRunningToolCall = useMemo(
     () => activeRunId === null
       ? undefined
       : (callId: string): void => { void stopToolCall(activeRunId, callId).catch(() => {}) },
     [activeRunId]
   )
+  /*
+    需求:一条跑得比预想久的前台命令,让它接着跑、但模型别再等它(转成后台 shell)。
+    ★ 失败静默,理由同上:false 只意味着它刚好跑完了 / 后台名额已满,此刻弹错误只会误导。
+  */
+  const backgroundRunningToolCall = useMemo(
+    () => activeRunId === null
+      ? undefined
+      : (callId: string): void => { void backgroundToolCall(activeRunId, callId).catch(() => {}) },
+    [activeRunId]
+  )
+  const subagentList = useMemo(() => Object.values(transcript.subagents), [transcript.subagents])
   const todoToolName = transcript.messages.flatMap((m) => m.parts).find((p): p is Extract<ContentPart, { type: 'tool_call' }> => p.type === 'tool_call' && p.name.includes('TodoWrite'))?.name
   const todos = todoToolName === undefined ? undefined : latestTodosFrom(transcript.messages, todoToolName)
   /*
@@ -703,8 +777,8 @@ export function ChatView({
   }
 
   const transferDialog = <Dialog open={uploadIntent !== null} title={t('ssh.uploadToServer')} onClose={() => { if (!transferring) cancelTransfer() }} footer={<>
-    <Button variant="ghost" disabled={transferring} onClick={cancelTransfer}>{t('common.cancel')}</Button>
-    <Button disabled={transferring} onClick={confirmTransfer}><Upload size={14} />{t(transferring ? 'chat.uploading' : 'ssh.uploadToServer')}</Button>
+    <Button type="button" variant="secondary" disabled={transferring} onClick={cancelTransfer}>{t('common.cancel')}</Button>
+    <Button type="button" variant="secondary" disabled={transferring} onClick={confirmTransfer}><Upload size={14} />{t(transferring ? 'chat.uploading' : 'ssh.uploadToServer')}</Button>
   </>}>
     {uploadIntent && <dl className="space-y-3 break-words text-[13px]">
       <div><dt className="text-fg-muted">{t('ssh.uploadSource')}</dt><dd>{uploadIntent.intent.name}</dd></div>
@@ -818,7 +892,7 @@ export function ChatView({
   function handleSkillifyCommand(args: string): void {
     if (sessionId === null) return
     const sourceSessionId = sessionId
-    void getSession(sourceSessionId)
+    void getSessionSummary(sourceSessionId)
       .then((detail) => startSkillExtraction({ workspace, sourceSessionId, sourceTitle: detail.session.title, hint: args, t }))
       .catch((error: unknown) => toast.error(t(skillExtractionErrorKey(error)), 'skill-extraction'))
   }
@@ -829,6 +903,9 @@ export function ChatView({
   const composer = (
     <SessionComposer
       storeKey={storeKey}
+      suggestTrigger={suggestTrigger}
+      started={started}
+      mentionedFiles={mentionedFiles}
       workspace={workspace}
       fallbackModel={fallbackModel}
       {...(sessionModel === undefined ? {} : { sessionModel })}
@@ -894,28 +971,17 @@ export function ChatView({
     ★ **队列区和清单跟着输入框走,不跟着转录走。** 它们属于「还没发出去的东西」那一侧,
     所以空态和常驻态两棵子树都要有它们 —— 用户在空会话里连发两条同样会排队。
 
-    需求:清单收起后是**一颗小球**,它不能自己再占一行 —— 那一行本来就被发送队列占着,
-    球只吃掉队列左边的一小块(截图:球在队列左边、同一行)。所以两者进同一个 grid:
-    **第 1 列是球的格子(36px)、第 2 列是队列**(`minmax(0,1fr)` 吃满余下),两列一起看
-    就是「一小块 + 一个队列框」;清单展开时它跨满两列、落到第 2 行,回到「队列在上、
-    清单在下」这个原有次序(见 `TaskChecklistShell`)。
-    ★ 队列那一格是**显式 `col-start-2`** 的:它不靠 DOM 顺序落格,所以第 1 列里有没有球、
-      清单是收着还是展开,都不会把它挪到别处 —— 没有球时第 1 列(空着)自然是 0 宽,
-      队列照旧占满整行。
-    ★ 清单自己带着球与卡片两个格子的定位(球是 `col-start-1` + `self-end`,卡片是
-      `col-span-full`,各自落哪一行见 `TaskChecklistShell` —— 收起的那 150ms 里两者同格),
-      同样与 DOM 顺序无关;所以这里只按**读起来顺**的次序排:队列在前、清单在后。
-    ★ 两个子组件的 `className` 都用来抹掉它们自己的居中/限宽/内边距:整块版式只由
-      这一层决定(见它们各自的 `className` 注释)。
+    任务清单原先也住在这里(收起是队列左边的一颗球),现在搬到了右上角的活动胶囊
+    (`ActivityCapsule`),这一块只剩发送队列。
   */
   const notices = (
     <div
-      className="mx-auto grid w-full max-w-[760px] grid-cols-[auto_minmax(0,1fr)] items-end gap-2 px-6 pb-2"
+      className="mx-auto w-full max-w-[760px] px-6 pb-2"
       data-testid="composer-notices"
     >
       {queuedInputs.length > 0 && (
         <PendingQueue
-          className="col-start-2 max-w-none px-0 pb-0"
+          className="max-w-none px-0 pb-0"
           items={queuedInputs}
           running={running}
           onPromote={promoteInput}
@@ -925,9 +991,7 @@ export function ChatView({
           onResume={() => resumeQueue(storeKey)}
         />
       )}
-      {todos !== undefined && (
-        <TaskChecklist className="max-w-none px-0 pb-0" todos={todos} execution={execution} />
-      )}
+      <WidgetContextChips storeKey={storeKey} />
     </div>
   )
 
@@ -945,13 +1009,21 @@ export function ChatView({
     任何一个标识符,所以以后谁往常驻布局里加一个新按钮,都不会顺手漏进只读面板。
     空态那一屏同理跳过 —— 它的全部内容就是问候语加一个输入框。
   */
+  // A run can already be active while its saved history and first events are still in flight.
+  // Only show the welcome screen after a successful empty read, including in read-only panels.
+  const historyPlaceholder = sessionId !== null && !hasRun(transcript, false) && !historyLoaded
+    ? historyError !== null
+      ? <ThreadLoadError onRetry={() => { void retryHistory() }} />
+      : <ThreadSkeleton />
+    : null
+
   if (readOnly) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="chat-readonly">
         {subagentOf !== undefined && sessionId !== null && (
           <SubagentLiveFeed childSessionId={sessionId} parent={subagentOf} />
         )}
-        <WorkspaceMarkdownProvider workspaceId={workspace.id} workspaceRoot={workspace.rootPath} onOpenFile={openMarkdownFile}>
+        {historyPlaceholder ?? <WorkspaceMarkdownProvider workspaceId={workspace.id} workspaceRoot={workspace.rootPath} onOpenFile={openMarkdownFile}>
           {/*
             ★ 只读面板只给 `root`(路径裁成相对),**不给 `open`** —— 这棵树的
             不变式是「零操作」(见上面那段),给了它文件名就会变成一枚能点的链接。
@@ -968,7 +1040,19 @@ export function ChatView({
               readOnly
             />
           </WorkspaceFileProvider>
-        </WorkspaceMarkdownProvider>
+        </WorkspaceMarkdownProvider>}
+      </div>
+    )
+  }
+
+  if (historyPlaceholder !== null) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {historyPlaceholder}
+        {goalLine}
+        {notices}
+        {composer}
+        {transferDialog}
       </div>
     )
   }
@@ -998,31 +1082,36 @@ export function ChatView({
     有了它列宽恒等于面板宽,放不下的东西交给各自的容器决定是换行、截断还是隐藏。
   */
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <SubagentOpenProvider open={openSubagent}>
-        <ToolStopProvider stop={stopRunningToolCall}>
+        <ToolStopProvider stop={stopRunningToolCall} background={backgroundRunningToolCall}>
           <WorkspaceMarkdownProvider workspaceId={workspace.id} workspaceRoot={workspace.rootPath} onOpenFile={openMarkdownFile}>
             <WorkspaceFileProvider root={workspace.rootPath} open={openToolFile}>
-              <Thread
-                sessionId={sessionId ?? undefined}
-                transcript={transcript}
-                runId={activeRunId}
-                model={modelName}
-                providerName={provider?.name}
-                lastSeq={lastSeq}
-                reportOptions={offComposerOptions}
-                goal={goal}
-                queued={queuedInputs.length}
-                compactError={compactError}
-                {...(contextLimits === undefined ? {} : { contextLimits })}
-                onEditMessage={onEditMessage}
-                onDeleteTurn={deleteTurn}
-                onBranchTurn={onBranchTurn}
-                workspaceId={workspace.id}
-                onOpenPlan={openMarkdownFile}
-                onExecutePlan={executePlan}
-                {...(typeof skillSourceId === 'string' ? { skillExtractionSourceId: skillSourceId } : {})}
-              />
+              <WidgetHostProvider value={widgetHost}>
+                <Thread
+                  sessionId={sessionId ?? undefined}
+                  transcript={transcript}
+                  runId={activeRunId}
+                  model={modelName}
+                  providerName={provider?.name}
+                  lastSeq={lastSeq}
+                  goal={goal}
+                  queued={queuedInputs.length}
+                  compactError={compactError}
+                  {...(contextLimits === undefined ? {} : { contextLimits })}
+                  onEditMessage={onEditMessage}
+                  onDeleteReply={deleteReply}
+                  onDeleteTurn={deleteTurn}
+                  onBranchTurn={onBranchTurn}
+                  workspaceId={workspace.id}
+                  onOpenPlan={openMarkdownFile}
+                  onExecutePlan={executePlan}
+                  historyHasMore={historyHasMore}
+                  loadingEarlier={loadingEarlier}
+                  onLoadEarlier={loadEarlier}
+                  {...(typeof skillSourceId === 'string' ? { skillExtractionSourceId: skillSourceId } : {})}
+                />
+              </WidgetHostProvider>
             </WorkspaceFileProvider>
           </WorkspaceMarkdownProvider>
         </ToolStopProvider>
@@ -1032,6 +1121,18 @@ export function ChatView({
       {notices}
       {composer}
       {transferDialog}
+      {/*
+        任务清单、子代理、后台命令收进右上角这一颗胶囊(原先清单是输入框上方的一张卡片)。
+        浮在转录上方、不占版式 —— 见 `ActivityCapsule` 的文件头。
+        ★ 排在最后:插在前面会挪动后面兄弟的位置,加载完历史时输入框会被重建、丢焦点。
+      */}
+      <ActivityCapsule
+        workspaceId={workspace.id}
+        todos={todos}
+        execution={execution}
+        subagents={subagentList}
+        onOpenSubagent={openSubagent}
+      />
     </div>
   )
 }
@@ -1077,6 +1178,42 @@ function summarizeConversationUsage(
     ...(latestTps === undefined ? {} : { latestTps }),
     ...(cost === undefined ? {} : { cost })
   }
+}
+
+/**
+ * widget 经 `host.setContext()` 发布、会随下一条消息交给模型的状态摘要。
+ *
+ * ★ 必须让用户看得见、删得掉:那段文字是模型写的 widget 产出的,而它会以用户这条消息的
+ *   名义进模型上下文。悄悄附上去,等于让一张图替用户补了半句话。
+ */
+function WidgetContextChips({ storeKey }: { storeKey: string }): ReactNode {
+  const { t } = useI18n()
+  const useSession = sessionStore(storeKey)
+  const entries = useSession((state) => state.widgetContext)
+  const remove = useSession((state) => state.removeWidgetContext)
+  if (entries.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 pt-1" data-testid="widget-context">
+      <span className="text-[11px] text-fg-faint">{t('widget.context.label')}</span>
+      {entries.map((entry) => (
+        <span
+          key={entry.key}
+          title={entry.text}
+          className="inline-flex max-w-[260px] items-center gap-1 rounded-pill bg-tint px-2 py-0.5 text-[11px] text-fg-muted"
+        >
+          <span className="truncate">{entry.title.replace(/_/g, ' ')}</span>
+          <button
+            type="button"
+            aria-label={t('widget.context.remove')}
+            className="cursor-pointer border-0 bg-transparent p-0 text-fg-faint hover:text-fg"
+            onClick={() => { remove(entry.key) }}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  )
 }
 
 function SessionComposer({ storeKey, ...props }: { storeKey: string } & Omit<ComponentProps<typeof Composer>, 'draft' | 'onDraft'>): ReactNode {

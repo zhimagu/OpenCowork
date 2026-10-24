@@ -8,7 +8,6 @@ import {
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
   Download,
   FolderOpen,
   HardDrive,
@@ -26,9 +25,11 @@ import type {
   ImportPreview,
   RestorePreview,
 } from "../../../../shared/domain/data";
-import { Button } from "../../components/ui/Button";
+import { Button } from "../../components/arc/button/button";
 import { Dialog } from "../../components/ui/Dialog";
-import { Toggle } from "../../components/ui/Toggle";
+import { Switch } from "../../components/arc/switch/switch";
+import { Select } from "../../components/ui/Select";
+import { TextInput } from "../../components/ui/TextInput";
 import { useI18n } from "../../i18n";
 import { cn } from "../../lib/cn";
 import * as dataService from "../../services/data";
@@ -335,6 +336,9 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
     { value: "weekly", label: t("data.frequency.weekly") },
   ];
   const ageOptions: ReadonlyArray<{ value: CleanupAge; label: string }> = [
+    { value: "7d", label: t("data.age.7d") },
+    { value: "15d", label: t("data.age.15d") },
+    { value: 1, label: t("data.age.1") },
     { value: 3, label: t("data.age.3") },
     { value: 6, label: t("data.age.6") },
     { value: 12, label: t("data.age.12") },
@@ -362,6 +366,8 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
             (syncStatus.control?.phase === "error" &&
               syncStatus.control?.errorCode === "migrationRequired") ? (
             <Button
+              type="button"
+              variant="secondary"
               size="sm"
               disabled={busyNow}
               onClick={() => {
@@ -395,12 +401,12 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
             last
           >
             {/* 状态以主进程为准：切换后由 configSync:changed 广播回来，页面不留镜像 */}
-            <Toggle
+            <Switch
               checked={syncStatus?.control?.selection.usage === true}
-              onChange={(enabled) => {
+              onCheckedChange={(enabled) => {
                 void run("sync-usage", () => configSyncService.setUsageSync(enabled), undefined, false);
               }}
-              label={t("usage.sync.toggle")}
+              aria-label={t("usage.sync.toggle")}
               disabled={busyNow}
             />
           </DataRow>
@@ -419,8 +425,8 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
               .join(" · ")}
           >
             <div className="flex items-center gap-1.5">
-              <Button size="sm" className="border border-border bg-transparent" onClick={() => { void run("sync-resolve-local", () => configSyncService.resolve(syncConflicts[0]!.id, false)); }} disabled={busyNow}>{t("data.cloudSyncKeepLocal")}</Button>
-              <Button size="sm" onClick={() => { void run("sync-resolve-remote", () => configSyncService.resolve(syncConflicts[0]!.id, true)); }} disabled={busyNow}>{t("data.cloudSyncUseRemote")}</Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => { void run("sync-resolve-local", () => configSyncService.resolve(syncConflicts[0]!.id, false)); }} disabled={busyNow}>{t("data.cloudSyncKeepLocal")}</Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => { void run("sync-resolve-remote", () => configSyncService.resolve(syncConflicts[0]!.id, true)); }} disabled={busyNow}>{t("data.cloudSyncUseRemote")}</Button>
             </div>
           </DataRow>
         )}
@@ -430,7 +436,7 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
             description={t("data.cloudSyncReviewHint")}
             last
           >
-            <Button size="sm" onClick={() => { void openSyncPreview(); }} disabled={busyNow}>
+            <Button type="button" size="sm" variant="secondary" onClick={() => { void openSyncPreview(); }} disabled={busyNow}>
               {t("data.cloudSyncReviewAction")}
             </Button>
           </DataRow>
@@ -451,12 +457,13 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
               options={[{ value: "json", label: "JSON" }]}
             />
             <Button
+              type="button"
+              variant="secondary"
               size="sm"
-              className="border border-accent bg-transparent text-accent hover:bg-accent/10"
-              icon={<Download size={13} />}
               disabled={busyNow}
               onClick={() => setModal({ kind: "export" })}
             >
+              <Download size={13} />
               {t("data.export")}
             </Button>
           </div>
@@ -467,14 +474,14 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           last
         >
           <Button
-            size="sm"
-            className="border border-accent bg-transparent text-accent hover:bg-accent/10"
-            icon={<Upload size={13} />}
+            type="button" size="sm"
+            variant="secondary"
             disabled={busyNow}
             onClick={() => {
               void openImportPreview();
             }}
           >
+            <Upload size={13} />
             {t("data.chooseAndImport")}
           </Button>
         </DataRow>
@@ -485,19 +492,20 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           title={t("data.backupDirectory")}
           description={backupDirectory ?? t("data.notSet")}
         >
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="secondary"
             disabled={busyNow}
             onClick={() => {
               void chooseDirectory();
             }}
-            className="app-no-drag inline-flex items-center gap-1.5 text-[12px] text-fg hover:text-accent disabled:opacity-40"
           >
-            <FolderOpen size={14} />{" "}
+            <FolderOpen size={13} />
             {backupDirectory
               ? t("data.changeDirectory")
               : t("data.chooseDirectory")}
-          </button>
+          </Button>
         </DataRow>
         <DataRow
           title={t("data.backupFrequency")}
@@ -526,9 +534,9 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           }
         >
           <Button
-            size="sm"
+            type="button" size="sm"
+            variant="secondary"
             disabled={backupDirectory === null || busyNow}
-            icon={<HardDrive size={13} />}
             onClick={() => {
               void run(
                 "backup",
@@ -537,6 +545,7 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
               );
             }}
           >
+            <HardDrive size={13} />
             {t("data.backupNow")}
           </Button>
         </DataRow>
@@ -546,14 +555,14 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           last
         >
           <Button
-            size="sm"
-            className="border border-accent bg-transparent text-accent hover:bg-accent/10"
-            icon={<RefreshCw size={13} />}
+            type="button" size="sm"
+            variant="secondary"
             disabled={riskDisabled}
             onClick={() => {
               void openRestorePreview();
             }}
           >
+            <RefreshCw size={13} />
             {t("data.chooseBackup")}
           </Button>
         </DataRow>
@@ -571,8 +580,8 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           density="compact"
         >
           <Button
-            size="sm"
-            icon={<FolderOpen size={13} />}
+            type="button" size="sm"
+            variant="secondary"
             disabled={busyNow}
             onClick={() => {
               void run(
@@ -582,6 +591,7 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
               );
             }}
           >
+            <FolderOpen size={13} />
             {t("data.openDirectory")}
           </Button>
         </DataRow>
@@ -591,8 +601,8 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           density="compact"
         >
           <Button
-            size="sm"
-            icon={<HardDrive size={13} />}
+            type="button" size="sm"
+            variant="secondary"
             disabled={busyNow}
             onClick={() => {
               void run(
@@ -602,6 +612,7 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
               );
             }}
           >
+            <HardDrive size={13} />
             {t("data.optimize")}
           </Button>
         </DataRow>
@@ -611,13 +622,14 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           density="compact"
         >
           <Button
-            size="sm"
-            icon={<Trash2 size={13} />}
+            type="button" size="sm"
+            variant="secondary"
             disabled={riskDisabled}
             onClick={() => {
               void openCleanupPreview("attachments");
             }}
           >
+            <Trash2 size={13} />
             {t("data.cleanup")}
           </Button>
         </DataRow>
@@ -631,16 +643,20 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
                 label: x.label,
               }))}
               className="w-[114px]"
-              onChange={(value) => setAge(Number(value) as CleanupAge)}
+              onChange={(value) =>
+                setAge(value === "7d" || value === "15d" ? value : (Number(value) as CleanupAge))
+              }
             />
             <Button
+              type="button"
+              variant="secondary"
               size="sm"
-              icon={<Trash2 size={13} />}
               disabled={riskDisabled}
               onClick={() => {
                 void openCleanupPreview("age", age);
               }}
             >
+              <Trash2 size={13} />
               {t("data.cleanup")}
             </Button>
           </div>
@@ -653,14 +669,14 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           last
         >
           <Button
-            size="sm"
+            type="button" size="sm"
             variant="danger"
-            icon={<Trash2 size={13} />}
             disabled={riskDisabled}
             onClick={() => {
               void openCleanupPreview("history");
             }}
           >
+            <Trash2 size={13} />
             {t("data.clearChats")}
           </Button>
         </DataRow>
@@ -674,14 +690,14 @@ export function DataPage({ settings, patch }: SettingsPageProps): ReactNode {
           last
         >
           <Button
-            size="sm"
+            type="button" size="sm"
             variant="danger"
-            icon={<Trash2 size={13} />}
             disabled={riskDisabled}
             onClick={() => {
               void openCleanupPreview("local-data");
             }}
           >
+            <Trash2 size={13} />
             {t("data.deleteAndQuit")}
           </Button>
         </DataRow>
@@ -812,6 +828,12 @@ function syncErrorMessage(
   if (code === "conflict") return t("data.cloudSyncErrorConflict");
   if (code === "storage") return t("data.cloudSyncErrorStorage");
   if (code === "locked") return t("data.cloudSyncErrorLocked");
+  if (code === "signedOut") return t("data.cloudSyncErrorSignedOut");
+  if (code === "invalidData") return t("data.cloudSyncErrorInvalidData");
+  if (code === "accountChanged") return t("data.cloudSyncErrorAccountChanged");
+  if (code === "busy") return t("data.cloudSyncErrorBusy");
+  // 其余 configSync.* 是内部错误码,不能把 i18n key 原样丢给用户
+  if (code !== null) return t("data.cloudSyncErrorUnknown");
   return message;
 }
 
@@ -869,39 +891,36 @@ function SyncSetupDialog({
       width={440}
       footer={(
         <div className="flex justify-end gap-2">
-          <Button size="sm" className="border border-border bg-transparent" onClick={onClose} disabled={busy}>
+          <Button type="button" size="sm" variant="secondary" onClick={onClose} disabled={busy}>
             {t("common.cancel")}
           </Button>
           <Button
-            size="sm"
+            type="button" size="sm"
+            variant="primary"
             onClick={onSubmit}
             disabled={busy || password.length < SYNC_PASSWORD_MIN_LENGTH}
-            icon={busy ? <Spinner size="sm" /> : undefined}
           >
+            {busy ? <Spinner size="sm" /> : undefined}
             {existing ? t("data.cloudSyncUnlock") : t("data.cloudSyncCreate")}
           </Button>
         </div>
       )}
     >
       <div className="space-y-3">
-        <input
+        <TextInput
           type="password"
           value={password}
-          onChange={(event) => onPassword(event.target.value)}
+          onChange={onPassword}
           placeholder={t("data.cloudSyncPassword")}
-          aria-label={t("data.cloudSyncPassword")}
-          autoComplete="new-password"
-          className="selectable h-8 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-accent"
+          ariaLabel={t("data.cloudSyncPassword")}
         />
         {!existing && (
-          <input
+          <TextInput
             type="password"
             value={passwordAgain}
-            onChange={(event) => onPasswordAgain(event.target.value)}
+            onChange={onPasswordAgain}
             placeholder={t("data.cloudSyncPasswordAgain")}
-            aria-label={t("data.cloudSyncPasswordAgain")}
-            autoComplete="new-password"
-            className="selectable h-8 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-accent"
+            ariaLabel={t("data.cloudSyncPasswordAgain")}
           />
         )}
         <div className="flex items-center justify-between gap-3 rounded-[8px] border border-border px-2.5 py-2">
@@ -909,7 +928,7 @@ function SyncSetupDialog({
             <p className="text-[12px] text-fg">{t("data.cloudSyncRemember")}</p>
             <p className="mt-0.5 text-[11px] text-fg-faint">{t("data.cloudSyncRememberHint")}</p>
           </div>
-          <Toggle checked={remember} onChange={onRemember} label={t("data.cloudSyncRemember")} />
+          <Switch checked={remember} onCheckedChange={onRemember} aria-label={t("data.cloudSyncRemember")} />
         </div>
         <p className="text-[11px] leading-[1.6] text-fg-faint">{t("data.cloudSyncEncryptionHint")}</p>
         {error !== null && (
@@ -946,8 +965,8 @@ function SyncPreviewDialog({
       width={520}
       footer={(
         <div className="flex justify-end gap-2">
-          <Button size="sm" className="border border-border bg-transparent" onClick={onClose} disabled={busy}>{t("data.cancel")}</Button>
-          <Button size="sm" onClick={onConfirm} disabled={busy}>{t("data.cloudSyncConfirm")}</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={onClose} disabled={busy}>{t("data.cancel")}</Button>
+          <Button type="button" size="sm" variant="primary" onClick={onConfirm} disabled={busy}>{t("data.cloudSyncConfirm")}</Button>
         </div>
       )}
     >
@@ -978,7 +997,7 @@ function DataSection({
   return (
     <section
       className={cn(
-        "mb-3.5 overflow-hidden rounded-[18px] border border-border bg-surface-field px-4",
+        "mb-3 overflow-hidden rounded-[18px] bg-surface px-4",
         className,
       )}
     >
@@ -1012,7 +1031,7 @@ function DataRow({
           : density === "compact"
             ? "min-h-[58px] py-2.5"
             : "min-h-[62px] py-3",
-        !last && "border-b border-hairline",
+        !last && "border-b border-border/50",
       )}
     >
       <div className="min-w-0 flex-1">
@@ -1057,26 +1076,17 @@ function SelectControl({
   ariaLabel: string;
   className?: string;
 }): ReactNode {
+  // 设置浮层是 z-100 的模态，Radix 弹层 portal 到 body，必须 inModal 才不会被压在下面。
   return (
-    <label className={cn("app-no-drag relative block w-[108px]", className)}>
-      <select
-        aria-label={ariaLabel}
+    <div className={cn("w-[108px]", className)}>
+      <Select
+        inModal
         value={value}
-        onChange={(event) => onChange?.(event.target.value)}
-        className="selectable h-7 w-full appearance-none rounded-pill border border-border bg-surface-field py-0 pr-7 pl-3 text-[12px] text-fg outline-none hover:bg-tint focus:border-accent"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        aria-hidden
-        size={13}
-        className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-fg-faint"
+        options={options}
+        ariaLabel={ariaLabel}
+        onValueChange={(next) => onChange?.(next)}
       />
-    </label>
+    </div>
   );
 }
 
@@ -1113,22 +1123,16 @@ function ExportDialog({
       width={500}
       footer={
         <>
-          <Button size="sm" disabled={busy} onClick={onClose}>
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </Button>
           <Button
-            size="sm"
-            variant="accent"
+            type="button" size="sm"
+            variant="primary"
             disabled={busy}
             onClick={onExport}
-            icon={
-              busy ? (
-                <Spinner size="sm" />
-              ) : (
-                <Download size={13} />
-              )
-            }
           >
+            {busy ? <Spinner size="sm" /> : <Download size={13} />}
             {t("data.exportJson")}
           </Button>
         </>
@@ -1147,10 +1151,10 @@ function ExportDialog({
               {t("data.encryptionHint")}
             </p>
           </div>
-          <Toggle
+          <Switch
             checked={includeKeys}
-            onChange={onIncludeKeys}
-            label={t("data.includeEncryptedCredentials")}
+            onCheckedChange={onIncludeKeys}
+            aria-label={t("data.includeEncryptedCredentials")}
           />
         </div>
         {includeKeys && (
@@ -1194,8 +1198,8 @@ function ImportDialog({
   onClose: () => void;
   onApply: () => void;
 }): ReactNode {
-  if (preview === null) return null;
   const { t } = useI18n();
+  if (preview === null) return null;
   return (
     <Dialog
       open={open}
@@ -1205,24 +1209,18 @@ function ImportDialog({
       width={520}
       footer={
         <>
-          <Button size="sm" disabled={busy} onClick={onClose}>
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </Button>
           <Button
-            size="sm"
-            variant="accent"
+            type="button" size="sm"
+            variant="primary"
             disabled={
               busy || (preview.hasEncryptedCredentials && password.length < 8)
             }
             onClick={onApply}
-            icon={
-              busy ? (
-                <Spinner size="sm" />
-              ) : (
-                <Upload size={13} />
-              )
-            }
           >
+            {busy ? <Spinner size="sm" /> : <Upload size={13} />}
             {t("data.confirmImport")}
           </Button>
         </>
@@ -1251,13 +1249,13 @@ function ImportDialog({
           <p className="mt-1 text-[11px] text-fg-faint">
             {t("data.importPasswordHint")}
           </p>
-          <input
+          <TextInput
             type="password"
             value={password}
-            onChange={(event) => onPassword(event.target.value)}
+            onChange={onPassword}
             placeholder={t("data.importPassword")}
-            aria-label={t("data.importPassword")}
-            className="selectable mt-2 h-8 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-accent"
+            ariaLabel={t("data.importPassword")}
+            className="mt-2"
           />
         </div>
       )}
@@ -1278,8 +1276,8 @@ function RestoreDialog({
   onClose: () => void;
   onApply: () => void;
 }): ReactNode {
-  if (preview === null) return null;
   const { locale, t } = useI18n();
+  if (preview === null) return null;
   return (
     <Dialog
       open={open}
@@ -1289,22 +1287,16 @@ function RestoreDialog({
       width={500}
       footer={
         <>
-          <Button size="sm" disabled={busy} onClick={onClose}>
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </Button>
           <Button
-            size="sm"
-            variant="accent"
+            type="button" size="sm"
+            variant="primary"
             disabled={busy}
             onClick={onApply}
-            icon={
-              busy ? (
-                <Spinner size="sm" />
-              ) : (
-                <RefreshCw size={13} />
-              )
-            }
           >
+            {busy ? <Spinner size="sm" /> : <RefreshCw size={13} />}
             {t("data.confirmRestore")}
           </Button>
         </>
@@ -1341,8 +1333,8 @@ function CleanupDialog({
   onClose: () => void;
   onApply: () => void;
 }): ReactNode {
-  if (preview === null) return null;
   const { t } = useI18n();
+  if (preview === null) return null;
   const dangerous = preview.kind === "history" || preview.kind === "local-data";
   const title =
     preview.kind === "attachments"
@@ -1361,22 +1353,16 @@ function CleanupDialog({
       width={500}
       footer={
         <>
-          <Button size="sm" disabled={busy} onClick={onClose}>
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </Button>
           <Button
-            size="sm"
+            type="button" size="sm"
             variant="danger"
             disabled={busy}
             onClick={onApply}
-            icon={
-              busy ? (
-                <Spinner size="sm" />
-              ) : (
-                <Trash2 size={13} />
-              )
-            }
           >
+            {busy ? <Spinner size="sm" /> : <Trash2 size={13} />}
             {preview.kind === "local-data"
               ? t("data.deletePermanentlyAndQuit")
               : t("data.confirmCleanup")}
@@ -1423,7 +1409,7 @@ function PreviewCounts({
       {rows.map(([label, value]) => (
         <div
           key={label}
-          className="rounded-[9px] bg-tint px-2 py-2 text-center"
+          className="rounded-[8px] bg-tint px-2 py-2 text-center"
         >
           <div className="text-[11px] text-fg-faint">{label}</div>
           <strong className="mt-0.5 block text-[14px] font-normal text-fg">
@@ -1449,13 +1435,12 @@ function PasswordField({
   return (
     <label className="block">
       <span className="mb-1 block text-[12px] text-fg-muted">{label}</span>
-      <input
+      <TextInput
         type="password"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         placeholder={placeholder}
-        aria-label={label}
-        className="selectable h-8 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-accent"
+        ariaLabel={label}
       />
     </label>
   );

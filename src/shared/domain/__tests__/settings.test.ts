@@ -117,6 +117,18 @@ describe('mergeSettings', () => {
  * 主题那两块单拎出来:它们是「主题」页上**紧挨着的两组控件**,
  * 而这一页正是最容易连点的一页(挑一张卡、再挑一个渲染方式、再重掷一次随机)。
  */
+describe('mergeSettings · 实验', () => {
+  it('老库里只存了 workflow 的,运行前确认按出厂值开着', () => {
+    const merged = mergeSettings(DEFAULT_SETTINGS, { experimental: { workflow: true } } as never)
+    expect(merged.experimental).toEqual({ workflow: true, workflowConfirm: true })
+  })
+
+  it('两项各改各的,互不覆盖', () => {
+    const off = mergeSettings(DEFAULT_SETTINGS, { experimental: { workflowConfirm: false } } as never)
+    expect(off.experimental).toEqual({ workflow: false, workflowConfirm: false })
+  })
+})
+
 describe('mergeSettings · 主题', () => {
   /**
    * ★ 这一条就是 `imageTheme.id` 写成可空**字段**、而不是把整块写成可空的理由。
@@ -279,6 +291,8 @@ describe('mergeSettings 的模型配对', () => {
     goalEvaluatorModel: 'shared', goalEvaluatorModelProviderId: 'codex',
     compactModel: 'shared', compactModelProviderId: 'codex',
     imageModel: 'shared', imageModelProviderId: 'codex',
+    completionModel: 'shared', completionModelProviderId: 'codex',
+    inlineCompletionModel: 'shared', inlineCompletionModelProviderId: 'codex',
     subagent: { ...base().subagent, model: 'shared', modelProviderId: 'codex' }
   })
 
@@ -355,6 +369,27 @@ describe('mergeSettings 的模型配对', () => {
     expect(s.compactThinking).toBe('minimal')
   })
 
+  it('★ 输入框补全的两个模型同理 —— 只给别名时旧供应商被清掉', () => {
+    let next = mergeSettings(pinned(), { completionModel: 'other' })
+    expect(next.completionModel).toBe('other')
+    expect(next.completionModelProviderId).toBeUndefined()
+    next = mergeSettings(pinned(), { inlineCompletionModel: '' })
+    expect(next.inlineCompletionModel).toBe('')
+    expect(next.inlineCompletionModelProviderId).toBeUndefined()
+  })
+
+  /**
+   * 三个补全开关:建议下一步与本地补全出厂开,打字续写出厂关(每次停顿都发一次请求);
+   * 只认布尔,坏值退回当前值。
+   */
+  it('补全开关:出厂值、只认布尔、坏值退回当前值', () => {
+    expect(DEFAULT_SETTINGS).toMatchObject({ promptSuggestions: true, localCompletion: true, inlineCompletion: false, completionModel: '', inlineCompletionModel: '' })
+    let s = mergeSettings(base(), { promptSuggestions: false, inlineCompletion: true })
+    expect(s).toMatchObject({ promptSuggestions: false, inlineCompletion: true })
+    s = mergeSettings(s, { promptSuggestions: 'yes' as unknown as boolean, localCompletion: 0 as unknown as boolean })
+    expect(s).toMatchObject({ promptSuggestions: false, localCompletion: true })
+  })
+
   it('成对给出时两个都写进去', () => {
     const next = mergeSettings(pinned(), { defaultModel: 'other', defaultModelProviderId: 'routin' })
     expect(next).toMatchObject({ defaultModel: 'other', defaultModelProviderId: 'routin' })
@@ -367,6 +402,8 @@ describe('mergeSettings 的模型配对', () => {
     expect(next.permissionReviewerModelProviderId).toBe('codex')
     expect(next.goalEvaluatorModelProviderId).toBe('codex')
     expect(next.compactModelProviderId).toBe('codex')
+    expect(next.completionModelProviderId).toBe('codex')
+    expect(next.inlineCompletionModelProviderId).toBe('codex')
   })
 })
 

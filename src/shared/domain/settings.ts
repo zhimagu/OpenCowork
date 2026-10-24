@@ -83,6 +83,27 @@ export interface ContextManagementSettings {
 }
 
 /**
+ * 设置 › 实验:尚未定型的功能。每一项都**出厂关闭** —— 打开它是用户在说
+ * 「我愿意用一个还会变的东西」,这句话不能替他说。
+ *
+ * ★ 一项转正后就从这里搬走、换成它自己的设置(或干脆不要开关),
+ *   而不是在这里永久留一个永远是 true 的开关。
+ */
+export interface ExperimentalSettings {
+  /**
+   * `Workflow` 工具:模型把任务编排成一张依赖图,按依赖并行派子代理执行,
+   * 对话里画成画布。关掉 = 工具不下发(`kernel/tool/builtin/workflow.ts` 的 `isEnabled`)。
+   */
+  workflow: boolean
+  /**
+   * 工作流派出任何节点之前先给用户看一眼图,点「运行」才开跑。
+   * ★ 出厂**开**,和别的实验项相反:一张图一次就是十几个子代理的 token,
+   *   模型画错图(汇总节点没接上游之类)时,开跑之前是唯一不花钱的拦截点。
+   */
+  workflowConfirm: boolean
+}
+
+/**
  * 界面「偏好 › 个性化」那三栏。**它是唯一一块会被原样拼进系统提示词的设置** ——
  * 见 `main/kernel/context-assembler.ts` 的 `buildPersonalizationSection`。
  *
@@ -401,6 +422,34 @@ export interface AppSettings {
   compactThinking: SubagentThinking
   /** 模型自提目标：默认放开，按用户原话直接设立。 */
   modelProposedGoals: ModelProposedGoals
+  /**
+   * 输入框「回合结束后建议下一步」(灰字,Tab 填入)。设计见 `docs/composer-autocomplete.md`。
+   *
+   * ★ 出厂**开启**:每轮最多一次请求、只发裁剪过的上下文(最近几条用户消息 + 回复末尾),
+   *   而它是输入框「提醒」里最有用的那一层。不想要的用户在设置里一键关掉。
+   */
+  promptSuggestions: boolean
+  /**
+   * 建议下一步用哪个模型;空字符串 = 跟随输入框此刻的模型(出厂默认)。
+   * ★ 跟随时不换家:同 `session-title.ts`「标题请求必须跟着正文走同一家」那条理由。
+   */
+  completionModel: string
+  /** 与 `completionModel` 成对,见 `defaultModelProviderId` */
+  completionModelProviderId?: string
+  /** 本地补全:历史指令前缀 + 改动过的文件名。零请求、零成本,出厂开启。 */
+  localCompletion: boolean
+  /**
+   * 打字中由模型续写。★ 出厂**关闭**:每次停顿都会把草稿发给所选模型 ——
+   * 这是隐私和钱包两方面的决定,只能由用户自己打开。
+   */
+  inlineCompletion: boolean
+  /**
+   * 打字续写用的模型。★ **没有「跟随会话」这一档**:会话模型多半是大模型,
+   * 首 token 一两秒,灰字到的时候用户早打过去了。空字符串 = 未选择,续写不生效。
+   */
+  inlineCompletionModel: string
+  /** 与 `inlineCompletionModel` 成对,见 `defaultModelProviderId` */
+  inlineCompletionModelProviderId?: string
   defaultModel: string
   /**
    * 与 `defaultModel` 成对:同一个别名可以挂在多家上,光凭别名定不下发给谁。
@@ -440,8 +489,45 @@ export interface AppSettings {
    */
   imageGenerationEnabled: boolean
 
+  /**
+   * 「对话视频生成使用的模型」(设置 › 模型 › 视频生成)。
+   *
+   * ★ 与 `imageModel` **同构、同一条规矩**:必选、不设自动档,只用点名的那个绑定,
+   *   失败就是失败(不跨家兜底)。理由是同一句话,只是代价更大 —— 视频按秒/分辨率
+   *   计费,「我点名了 A、出片的却是 B」既更贵,又更难发现(要等好几分钟)。
+   *
+   * ★ 空字符串 = **没选过**,`generate_video` 的**新建**动作整体不下发
+   *   (`kernel/video-gen.ts`)。已提交任务的查询/取消**不看它** ——
+   *   那是另一条路径,见下面 `videoGenerationEnabled` 那段。
+   *
+   * 与 `defaultModel` 成对,见那边 `defaultModelProviderId` 的说明:
+   * 改 `videoModel` 的 patch 必须同时给 `videoModelProviderId`。
+   */
+  videoModel: string
+  /** 与 `videoModel` 成对,见 `defaultModelProviderId` */
+  videoModelProviderId?: string
+  /**
+   * 「对话视频生成」开关(设置 › 模型 › 视频生成)。关掉 = **不新建**任务。
+   *
+   * ★★ **这一项和 `imageGenerationEnabled` 有一处关键不同,写在字段上免得被后人
+   *    "顺手统一":** 关掉生图 = `generate_image` 整体不下发、调用被拒,因为生图是
+   *    同步的,不存在"已经提交出去了"这回事。关掉视频生成**只禁止新建** ——
+   *    已经提交到云端的任务照常查询、照常收取成品。
+   *
+   *    理由:一个视频任务在云端可能已经跑了五分钟、**已经计过费**;关掉本地开关
+   *    不会让它停下来,也不会退款。这时把它从界面上藏起来,只会让用户永远不知道
+   *    结果。要停某一个任务,用那张结果卡上**独立**的取消按钮。
+   *
+   * ★ 出厂开启:与生图同一条理由 —— 选好模型本身就是"我要生成视频"的意思。
+   * ★ 与 `videoModel` 分开,理由同为"模型答'用谁生成'、开关答'要不要新建'"。
+   */
+  videoGenerationEnabled: boolean
+
   /** 上下文管理：默认只开自动压缩，智能窗口模式要用户自己打开。 */
   contextManagement: ContextManagementSettings
+
+  /** 设置 › 实验。见 `ExperimentalSettings` */
+  experimental: ExperimentalSettings
 
   /**
    * 执行本地命令 / 命令钩子 / 新建终端用哪个 shell。
@@ -606,12 +692,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 这就是引入这两栏之前的行为,老用户升级后压缩发给谁一个字都不变。
   compactModel: '',
   compactThinking: INHERIT_THINKING,
+  // 输入框补全:建议下一步与本地补全出厂开,打字续写出厂关(理由见 AppSettings 上的字段说明)
+  promptSuggestions: true,
+  completionModel: '',
+  localCompletion: true,
+  inlineCompletion: false,
+  inlineCompletionModel: '',
   defaultModel: '',
   // 空 = 没选过生图模型,`generate_image` 不下发(见 AppSettings.imageModel 的说明)
   imageModel: '',
   // 生图开关出厂开启 —— 理由见 AppSettings.imageGenerationEnabled
   imageGenerationEnabled: true,
+  // 空 = 没选过视频模型,`generate_video` 的**新建**动作不下发(见 AppSettings.videoModel)
+  videoModel: '',
+  // 视频生成开关出厂开启 —— ★ 它只管"要不要新建",已提交任务照常收取,
+  // 理由写在 AppSettings.videoGenerationEnabled 那段。
+  videoGenerationEnabled: true,
   contextManagement: { autoCompact: true },
+  // 实验功能一律出厂关闭 —— 理由见 ExperimentalSettings
+  experimental: { workflow: false, workflowConfirm: true },
   upstreamIdleTimeoutSeconds: DEFAULT_UPSTREAM_IDLE_TIMEOUT_SECONDS,
   maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
   shell: 'system',
@@ -666,12 +765,12 @@ export function mergeSettings(current: AppSettings, patch: AppSettingsPatch): Ap
   if (patch.defaultPermissionMode !== undefined) {
     next.defaultPermissionMode = patch.defaultPermissionMode
   }
-  // ★★ 六个「模型别名 + 供应商」配对一律**成对写**:只要 patch 给了别名,
+  // ★★ 八个「模型别名 + 供应商」配对一律**成对写**:只要 patch 给了别名,
   //    供应商就跟着 patch 走,哪怕 patch 里它是 `undefined`(那是「取消锁定」,
   //    供应商被删时的降级路径就靠这个)。
   //    只写别名、让旧 providerId 留下来的话,就会得到「新别名 + 旧供应商」——
   //    正是 `model-selection.ts` 那一整个模块要消灭的那个 bug,在它自己的
-  //    合并函数里复活一次。这六处一个都不能漏。
+  //    合并函数里复活一次。这八处一个都不能漏。
   if (patch.permissionReviewerModel !== undefined) {
     next.permissionReviewerModel = patch.permissionReviewerModel
     next.permissionReviewerModelProviderId = patch.permissionReviewerModelProviderId
@@ -698,6 +797,18 @@ export function mergeSettings(current: AppSettings, patch: AppSettingsPatch): Ap
   if (isModelProposedGoals(patch.modelProposedGoals)) {
     next.modelProposedGoals = patch.modelProposedGoals
   }
+  // 输入框补全:三个开关只认布尔(同 imageGenerationEnabled),两个模型成对写
+  if (typeof patch.promptSuggestions === 'boolean') next.promptSuggestions = patch.promptSuggestions
+  if (patch.completionModel !== undefined) {
+    next.completionModel = patch.completionModel
+    next.completionModelProviderId = patch.completionModelProviderId
+  }
+  if (typeof patch.localCompletion === 'boolean') next.localCompletion = patch.localCompletion
+  if (typeof patch.inlineCompletion === 'boolean') next.inlineCompletion = patch.inlineCompletion
+  if (patch.inlineCompletionModel !== undefined) {
+    next.inlineCompletionModel = patch.inlineCompletionModel
+    next.inlineCompletionModelProviderId = patch.inlineCompletionModelProviderId
+  }
   if (patch.defaultModel !== undefined) {
     next.defaultModel = patch.defaultModel
     next.defaultModelProviderId = patch.defaultModelProviderId
@@ -711,8 +822,23 @@ export function mergeSettings(current: AppSettings, patch: AppSettingsPatch): Ap
   if (typeof patch.imageGenerationEnabled === 'boolean') {
     next.imageGenerationEnabled = patch.imageGenerationEnabled
   }
+  // 视频:成对写 + 布尔白名单,与生图那两处逐字同构(理由见上面那两段)。
+  if (patch.videoModel !== undefined) {
+    next.videoModel = patch.videoModel
+    next.videoModelProviderId = patch.videoModelProviderId
+  }
+  if (typeof patch.videoGenerationEnabled === 'boolean') {
+    next.videoGenerationEnabled = patch.videoGenerationEnabled
+  }
   if (patch.contextManagement !== undefined) {
     next.contextManagement = { ...next.contextManagement, ...patch.contextManagement }
+  }
+  // 只认布尔(同 imageGenerationEnabled):非布尔落库后 `=== true` 会把它静默读成「关」
+  if (typeof patch.experimental?.workflow === 'boolean') {
+    next.experimental = { ...next.experimental, workflow: patch.experimental.workflow }
+  }
+  if (typeof patch.experimental?.workflowConfirm === 'boolean') {
+    next.experimental = { ...next.experimental, workflowConfirm: patch.experimental.workflowConfirm }
   }
   // ★ 范围外的坏值退回当前值而不是默认值 —— 这一项改小了会把慢模型全数
   //   秒杀,静默放宽/收紧都不是可接受的失败形态(shell 那条同理)。
@@ -823,12 +949,23 @@ const PATCHABLE_KEYS: Record<keyof AppSettings, true> = {
   compactModel: true,
   compactModelProviderId: true,
   compactThinking: true,
+  promptSuggestions: true,
+  completionModel: true,
+  completionModelProviderId: true,
+  localCompletion: true,
+  inlineCompletion: true,
+  inlineCompletionModel: true,
+  inlineCompletionModelProviderId: true,
   defaultModel: true,
   defaultModelProviderId: true,
   imageModel: true,
   imageModelProviderId: true,
   imageGenerationEnabled: true,
+  videoModel: true,
+  videoModelProviderId: true,
+  videoGenerationEnabled: true,
   contextManagement: true,
+  experimental: true,
   upstreamIdleTimeoutSeconds: true,
   maxOutputTokens: true,
   shell: true,

@@ -1,7 +1,7 @@
 /**
  * KernelHost 的 Electron 实现 —— **electron 只在这里泄漏**(方案 §2 的拓扑图)。
  *
- * `host.ts` 已经把 `nodeHost()` 定义成真实默认值,所以这里只覆盖四项:
+ * `host.ts` 已经把 `nodeHost()` 定义成真实默认值,所以这里只覆盖五项:
  *
  * | 端口 | 为什么非 Electron 不可 |
  * |---|---|
@@ -9,6 +9,7 @@
  * | `secrets` | 程序主密钥加密后存 SQLite;旧 safeStorage 密文仍需 Electron 解密迁移 |
  * | `fetch`   | `net.fetch` 走 Chromium 网络栈,于是 `net/proxy.ts` 那一次 `setProxy` 对全应用的出站请求一起生效 |
  * | `childEnv`| Agent 子进程的代理环境变量 —— 系统代理/PAC 只有 Chromium 的 session 知道,`shellProxyEnv` 负责去问 |
+ * | `resolveProxyForHost` | SSH 同样是子进程,`setProxy` 管不到它 —— 「连这台主机该走哪个代理」也只有 Chromium 的 session 知道,`net/proxy.ts` 负责去问 |
  *
  * 其余端口(clock / logger / fs / spawn)在 Electron 里和在 Node 里是同一件事,
  * 覆盖它们只会多一份要同步维护的代码。(spawn 会**消费** childEnv,见 nodeHost;
@@ -16,14 +17,18 @@
  */
 import { app, net, safeStorage } from 'electron'
 import {
+  fileCredentialProviderId,
   getCredential,
   getSettings,
   listAllCredentialBlobs,
+  providerFileStore,
   putCredential,
   putCredentialBlobAtPhysicalRef,
   removeCredential
 } from '../db/repo'
 import { databaseDirectory } from '../db'
+import type { ProviderFileStore } from '../db/provider-file'
+import { migrateProvidersToFileWith, type ProviderFileMigrationResult } from '../db/provider-file-migration'
 import {
   decryptCredentialValue,
   encryptCredentialValue,
@@ -35,7 +40,7 @@ import {
 } from '../secrets/credential-crypto'
 import { configProfileDirectory } from '../db/config-profile'
 import { attachmentRoot } from '../net/attachment-protocol'
-import { shellProxyEnv } from '../net/proxy'
+import { shellProxyEnv, resolveProxyForHost } from '../net/proxy'
 import type { KernelHost } from '../kernel/host'
 import { nodeHost } from '../kernel/host'
 import { agentShell } from '../kernel/node-spawn'
@@ -67,6 +72,14 @@ function decryptBlob(blob: Uint8Array): string {
 
 function electronSecrets(): KernelHost['secrets'] {
   const setSync = (ref: string, value: string): void => {
+      // `provider:<id>` 的密钥在文件模式下归 providers.json(明文),不走 NCK1。
+      const fileProviderId = fileCredentialProviderId(ref)
+      if (fileProviderId !== null) {
+        const file = providerFileStore()
+        if (value === '') file?.removeCredential(fileProviderId)
+        else file?.setCredential(fileProviderId, value)
+        return
+      }
       // 库里已有 NCK1 说明它们和某一把 key 绑定。key 文件丢了或不匹配
       // 就必须抛错;生成新 key 会让同一张表出现两套不可兼容密文。
       const programRow = listAllCredentialBlobs().find((row) => isProgramEncrypted(row.blob))
@@ -79,6 +92,8 @@ function electronSecrets(): KernelHost['secrets'] {
   const removeSync = (ref: string): void => removeCredential(ref)
   return {
     get: async (ref) => {
+      const fileProviderId = fileCredentialProviderId(ref)
+      if (fileProviderId !== null) return providerFileStore()?.getCredential(fileProviderId) ?? null
       const blob = getCredential(ref)
       return blob === undefined ? null : decryptBlob(blob)
     },
@@ -90,6 +105,13 @@ function electronSecrets(): KernelHost['secrets'] {
     // 会在第一次 get/set 时抛出,而不是把密钥静默降级成明文。
     available: () => true
   }
+}
+
+export { PROVIDER_FILE_BACKUP_NAME, type ProviderFileMigrationResult } from '../db/provider-file-migration'
+
+/** 启动期一次性迁移,见 `db/provider-file-migration.ts`。这里只负责把「怎么解密」递进去。 */
+export function migrateProvidersToFile(file: ProviderFileStore): ProviderFileMigrationResult {
+  return migrateProvidersToFileWith(file, decryptBlob)
 }
 
 /**
@@ -177,7 +199,12 @@ export function electronHost(): KernelHost {
       secrets: electronSecrets(),
       fetch: electronFetch,
       // Agent 的 shell 命令默认跟随应用/系统代理 —— 见上面表格里 childEnv 那一行
-      childEnv: shellProxyEnv
+      childEnv: shellProxyEnv,
+      /*
+        SSH 也是子进程,`setProxy` 管不到它 —— 它反过来问「连这台主机该走哪个代理」
+        (`environment/ssh/proxy.ts`)。判定与凭据全在 `net/proxy.ts`,和模型请求同一份。
+      */
+      resolveProxyForHost
     }, () => agentShell(getSettings().shell))
   )
 }

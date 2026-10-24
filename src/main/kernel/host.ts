@@ -14,9 +14,11 @@
  */
 import { release, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Readable } from 'node:stream'
 import { nodeFs } from './node-fs'
 import { agentShell, nodeSpawn } from './node-spawn'
 import type { EnvironmentFacts } from '../../shared/domain/environment'
+import type { ProxyDialTarget } from '../../shared/domain/proxy'
 
 export interface Logger {
   debug(msg: string, ...args: unknown[]): void
@@ -57,12 +59,53 @@ export interface KernelFs {
    * 因此天然满足它,不必各自再包一层。
    */
   writeBytes?(absPath: string, bytes: Uint8Array, options?: { exclusive?: boolean; mode?: number }): Promise<void>
+  /**
+   * 把一个**流**写进工作区文件,全程有上限、有背压、失败即清理。
+   *
+   * 需求:`SaveVideo` 要把一段几十到几百兆的视频写进工作区,而 `writeBytes` 拿的是
+   * "已经完整在内存里的 Uint8Array" —— 视频那个量级下那意味着主进程先分配几百兆,
+   * 而 SSH 那侧还有自己的 32 MiB 上限。所以单开一条:
+   *
+   * - **边拉边写**,不出现"完整视频"的 Buffer;
+   * - `maxBytes` 超出时**当场断并清理**半截文件(而不是写完再删);
+   * - 失败不碰旧文件:写临时名,成功才 rename;`exclusive` 时由文件系统原子判定;
+   * - `signal` 中断同样清理。
+   *
+   * ★ 可选:缺席 = 这个宿主存不了大文件,`SaveVideo` 整体不下发
+   *   (不画一个会在几百兆时才失败的承诺)。
+   */
+  writeStream?(
+    absPath: string,
+    source: ReadableStream<Uint8Array>,
+    options: { exclusive?: boolean; mode?: number; maxBytes: number },
+    signal: AbortSignal
+  ): Promise<{ ok: true; size: number } | { ok: false; reason: string }>
 }
 
 export interface SpawnResult {
   code: number
   stdout: string
   stderr: string
+  /**
+   * 命令被**转去后台**了(`detach` 信号响了且进程还活着)。
+   *
+   * 有这一格时 `code` 没有意义,`stdout` / `stderr` 是转走那一刻之前攒下的输出;
+   * 进程本身连同两条管道交给调用方 —— 从这一刻起超时与 `signal` 都不再管它,
+   * 它的生死归接手的人(`main/agent-shells.ts`)。
+   */
+  detached?: DetachedProcess
+}
+
+/**
+ * 一条从前台转走、仍在跑的进程。形状是 `EnvironmentProcess` 去掉 stdin 的那部分 ——
+ * 前台命令的 stdin 本来就是关着的。
+ */
+export interface DetachedProcess {
+  stdout: Readable
+  stderr: Readable
+  exited: Promise<{ code: number | null; signal?: string | null }>
+  /** 杀整棵进程树(同前台停止的那一条路径),不是只杀 shell。 */
+  kill(): void
 }
 
 /**
@@ -88,6 +131,16 @@ export type SpawnFn = (
      * ★ 回调抛异常不得影响命令本身,实现方逐个 try。
      */
     onOutput?: (chunk: { stream: 'stdout' | 'stderr'; text: string }) => void
+    /**
+     * 这条信号一响,命令**不再被等**:超时与 `signal` 一起卸掉,进程原样交出去
+     * (`SpawnResult.detached`)。需求:用户在工具卡上把一条跑得比预想久的前台命令
+     * 转成后台,而不是只能二选一地「干等」或「掐掉重来」。
+     *
+     * ★ 可选,且**实现方可以不支持**(SSH 那条路今天就不支持)。不支持的实现
+     * 忽略它即可 —— 调用方据 `SpawnResult.detached` 是否存在判断转没转走,
+     * 是否画那颗按钮由 `ShellBridge.adopt` 是否存在决定。
+     */
+    detach?: AbortSignal
   }
 ) => Promise<SpawnResult>
 
@@ -184,6 +237,18 @@ export interface KernelHost {
    *   Chromium session 可问,注入也只能是错的。
    */
   childEnv?: () => Record<string, string> | Promise<Record<string, string>>
+  /**
+   * 「连这台主机该走哪个代理」;`null` = 直连。
+   *
+   * 需求:SSH 连接默认跟随应用/系统代理,而 ssh 是子进程,`session.setProxy` 管不到它
+   * ——只能反过来问。答案(手动代理 / 系统代理 / PAC / 直连白名单)由 electron 侧
+   * `net/proxy.ts` 的 `resolveProxyForHost` 给出,和模型请求同一份。
+   *
+   * ★ 可选:纯 Node 默认值**没有**这一项(undefined = 直连)。无头/测试环境没有
+   *   `defaultSession` 可问,也没有「用户设过的代理」;此时返回 null 正是我想要的行为。
+   *   `environment/ssh/transport.ts` 的 `prepareProxy` 就是按缺席即不插手写的。
+   */
+  resolveProxyForHost?(hostname: string, port: number): Promise<ProxyDialTarget | null>
   fetch: typeof fetch
 }
 

@@ -153,7 +153,7 @@ export function AccountMenu({
       {(close) => (
         <>
           {/* 面板头部：同一份身份信息的展开态，比触发按钮多一行邮箱 */}
-          <div className="flex items-center gap-2.5 px-2.5 pt-2 pb-2">
+          <div className="flex items-center gap-2.5 px-2.5 pt-2 pb-3">
             <Avatar url={avatarUrl} size={36} />
             <span className="min-w-0 flex-1 leading-tight">
               <span className="block truncate text-[13px] text-fg">{name}</span>
@@ -262,12 +262,12 @@ function BalanceRow({
 }): ReactNode {
   const { t } = useI18n()
   return (
-    <div className="flex items-center gap-1 rounded-[7px] transition-colors hover:bg-tint-strong motion-reduce:transition-none">
+    <div className="flex items-center gap-1 rounded-[8px] transition-colors hover:bg-tint-strong motion-reduce:transition-none">
       <button
         type="button"
         role="menuitem"
         onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[7px] px-2.5 py-[7px] text-left text-[13px] text-fg"
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[8px] px-2.5 py-[7px] text-left text-[13px] text-fg"
       >
         <span className="shrink-0 text-accent-soft">
           <Gem size={14} />

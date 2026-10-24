@@ -72,11 +72,11 @@ import {
   type ContextSegmentKind,
 } from "../../../../shared/agent/context-management";
 import { formatCostMicros, longContextSurcharge, findPricing, type RunCost } from "../../../../shared/domain/pricing";
-import { PRICING_SEED } from "../../../../shared/domain/pricing-seed";
+import { usePricingTable } from "../../services/pricing";
 import { formatTokensPerSecond } from "../../../../shared/agent/duration";
 import { formatTokenCount } from "../../../../shared/agent/tokens";
 import { findBuiltinModel } from "../../../../shared/domain/model-catalog-inventory";
-import { modelThinkingLevels, normalizeModelThinkingLevel } from "../../../../shared/domain/model-runtime";
+import { effectiveModelThinking, modelThinkingLevels, normalizeModelThinkingLevel } from "../../../../shared/domain/model-runtime";
 import type {
   Workspace,
   WorkspaceSettings,
@@ -149,6 +149,8 @@ import { listModes, onModesChanged } from '../../services/modes';
 import { SkillPopup, type SlashItem } from './SkillPopup';
 import type { TranslationKey } from "../../i18n";
 import type { DraftSelection } from './rich-draft';
+import type { FileSuggestion as HotFile } from "../../../../shared/domain/file-tree";
+import { useComposerGhost } from './useComposerGhost';
 
 /**
  * 内置命令的副标题。★ 磁盘上的命令取 frontmatter 里的 `description`(那是用户
@@ -233,6 +235,9 @@ export function Composer({
   goal,
   onManageMcp,
   conversationUsage,
+  suggestTrigger,
+  started = true,
+  mentionedFiles,
 }: {
   workspace: Workspace;
   /** 应用级默认模型(设置页那个)。工作区还没选过时用它兜底 */
@@ -312,6 +317,15 @@ export function Composer({
   onManageMcp?: () => void;
   /** 整个会话的累计用量，以及最近一轮可计算的输出速度。 */
   conversationUsage?: ConversationUsageSummary;
+  /**
+   * 「刚刚看着一轮成功跑完」的那个 `runEndedAt`(见 `suggest-trigger.ts`)。每变一次,
+   * 输入框就为空草稿请求一次「建议下一步」。缺省 = 不建议。
+   */
+  suggestTrigger?: number;
+  /** 这条会话发过消息了没有。没有时占位符多教一句 `@` 和 `/` 怎么用 */
+  started?: boolean;
+  /** 本会话 `@` 过的文件 —— 热文件补全的来源之一 */
+  mentionedFiles?: readonly HotFile[];
 }): ReactNode {
   const { t } = useI18n();
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
@@ -774,6 +788,25 @@ export function Composer({
     : mode.description;
   const selectedModeName = selectedMode === undefined ? value.mode : modeName(selectedMode);
 
+  /*
+    ── 灰字(Tab 接受):建议下一步 / 历史指令 / 热文件 / 打字续写 ──
+    ★ 弹层开着时一律不出灰字:那一刻 Tab 归弹层(见 `handleMentionKey` / `handleSkillKey`)。
+  */
+  const ghost = useComposerGhost({
+    input,
+    workspace,
+    sessionId: sessionId ?? null,
+    draft,
+    popupOpen: mention !== null || skillQuery !== null || skillPickerOpen,
+    attachments: attachments.length,
+    running,
+    model,
+    modelProviderId,
+    suggestTrigger,
+    mentionedFiles,
+    commands: [...commands.map((c) => c.name), ...skills.map((sk) => sk.name)],
+  });
+
   function submit(): void {
     const raw = draft.trim();
     // ★ 只有附件、没有文字也该能发 —— 拖一张图进来直接问「这是什么」是常见用法。
@@ -814,6 +847,7 @@ export function Composer({
     // ★ `modelProviderId` 必须和 `model` 一起覆盖:两者都可能来自兜底而不在 `value` 里,
     //   只覆盖一半就会把「兜底的别名」配上「value 里那个陈旧的供应商」。
     onSend(text, { ...value, model, modelProviderId, thinking });
+    ghost.onSubmit(raw);
     onDraft("");
     // 草稿清空了,弹层也得跟着走 —— 不清的话它会挂在一个已经不存在的查询上
     dismissedAt.current = null;
@@ -858,11 +892,17 @@ export function Composer({
       {/*
         ★ `surface-input` 不是 `surface-raised`:深色下两者同值,浅色下输入框是**纯白**
         (#ffffff),而 raised 卡片是 #f2eee6。合并了浅色主题下输入框就沉进背景里。
+
+        背景和柔和阴影区分输入区,聚焦时略微抬高阴影。权限由药丸显示,
+        运行状态由停止按钮显示;只有拖入文件时才显示轮廓,提示可放置区域。
       */}
       <div
         className={cn(
-          "relative mx-auto w-full max-w-[760px] rounded-panel border bg-surface-input transition-colors",
-          dragging ? "border-accent" : "border-border",
+          // 苹果风格:大圆角玻璃输入框 —— 半透明底 + 浅色描边,聚焦时描边换成强调色。
+          // ★ 不能加 backdrop-blur:它会让这个框成为 fixed 定位的包含块,框里弹出的
+          //   上下文 / 权限等浮层就改成相对输入框定位,整块飞到右下角(见 ui/Menu.tsx 文件头)
+          "relative mx-auto w-full max-w-[760px] rounded-[22px] border border-[var(--border-strong)] bg-surface-input/80 shadow-[0_8px_24px_rgb(0_0_0/0.08)] transition-[border-color,box-shadow] duration-200 focus-within:border-accent/60 focus-within:shadow-[0_0_0_3px_var(--focus-outline),0_8px_24px_rgb(0_0_0/0.1)] motion-reduce:transition-none",
+          dragging && "ring-2 ring-accent/60",
         )}
         onDragOver={(e) => {
           if (onAttachFiles === undefined) return;
@@ -902,7 +942,15 @@ export function Composer({
           value={draft}
           handle={input}
           metrics={DRAFT_METRICS}
-          placeholder={running ? t("chat.queuePlaceholder") : t("chat.placeholder")}
+          placeholder={
+            ghost.view !== null && ghost.view.empty ? (
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="min-w-0 truncate">{ghost.view.display}</span>
+                {ghost.view.showHint && <GhostKey />}
+              </span>
+            ) : running ? t("chat.queuePlaceholder") : started ? t("chat.placeholder") : t("composer.placeholder.fresh")
+          }
+          ghost={ghost.view !== null && !ghost.view.empty ? ghost.view.display : undefined}
           skillDescriptions={Object.fromEntries(skills.map((skill) => [skill.name, skill.description]))}
           aria-expanded={mention !== null || skillQuery !== null}
           aria-controls={mention !== null ? mentionListId : skillQuery !== null ? skillListId : undefined}
@@ -916,22 +964,28 @@ export function Composer({
             lastCaret.current = caret;
             syncMention(text, caret);
             syncSkill(text, caret);
+            ghost.onInput(text, caret);
           }}
           // 点击 / 方向键挪动光标也要重算 —— `@` 的判据是位置不是按键
           onCaret={(text, caret) => {
             lastCaret.current = caret;
             syncMention(text, caret);
             syncSkill(text, caret);
+            ghost.onCaret(text, caret);
           }}
           onComposing={(v) => {
             composing.current = v;
+            ghost.onComposing(v);
           }}
-          onBlur={() => { setMention(null); setSkillQuery(null) }}
-          onPaste={handlePaste}
+          onFocus={ghost.onFocus}
+          onBlur={() => { setMention(null); setSkillQuery(null); ghost.onBlur() }}
+          onPaste={(e) => { ghost.onPaste(); handlePaste(e) }}
           onKeyDown={(e) => {
             // 弹层开着时方向键 / Enter / Tab / Esc 归它,先问一句
             if (handleMentionKey(e)) return;
             if (handleSkillKey(e)) return;
+            // 然后是灰字:Tab / → / ⌘→ / Esc。★ Enter 不在其中 —— 接受和发送是两个动作
+            if (ghost.handleKey(e)) return;
             // Enter 发送,Shift+Enter 换行。输入法组词期间的 Enter 是「上屏」,
             // 不是「发送」—— 少了 isComposing 这个判断,中文用户每打一个词就发一次。
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -952,7 +1006,6 @@ export function Composer({
           <Menu
             label={t("composer.permission")}
             width={280}
-            panelClassName="rounded-xl bg-surface-input p-1 shadow-lg shadow-black/10"
             triggerClassName="rounded-full focus-visible:outline-2 focus-visible:outline-accent"
             trigger={
               <Pill accent={value.permissionMode === "full"}>
@@ -980,7 +1033,7 @@ export function Composer({
                     {t(`permission.${m}` as "permission.ask" | "permission.auto" | "permission.full")}
                   </ComposerMenuItem>
                 ))}
-                <div className="mx-2 mt-1 border-t border-border pt-1.5 pb-1 text-[10px] leading-4 text-fg-faint">
+                <div className="mx-2 mt-2 pt-1.5 pb-1 text-[10px] leading-4 text-fg-faint">
                   {t("composer.approvalHint")}
                 </div>
               </>
@@ -992,7 +1045,6 @@ export function Composer({
             label={t("composer.more")}
             width={320}
             onOpenChange={(open) => { if (!open) setPluginToolsOpen(false); }}
-            panelClassName="rounded-xl bg-surface-input p-1 shadow-lg shadow-black/10"
             triggerClassName="group rounded-full focus-visible:outline-2 focus-visible:outline-accent"
             trigger={
               <span className={cn(
@@ -1067,7 +1119,21 @@ export function Composer({
             )}
           </Menu>
 
-          <div className="flex-1" />
+          {/*
+            非空草稿上挂着灰字时,这一格说一句「Tab 接受」。★ 放在药丸行的空白里而不是叠在
+            文字上:灰字可能一直写到行尾,任何叠上去的提示都会盖住它。
+          */}
+          <div className="flex min-w-0 flex-1 items-center px-2">
+            {ghost.view !== null && !ghost.view.empty && ghost.view.showHint && (
+              <span className="flex items-center gap-1 truncate text-[11px] text-fg-faint">
+                <GhostKey />
+                {t("composer.ghost.accept")}
+              </span>
+            )}
+          </div>
+          <span className="sr-only" aria-live="polite">
+            {ghost.view !== null ? t("composer.ghost.announce", { text: ghost.view.announce }) : ""}
+          </span>
 
           {/*
             ── 右半边:「怎么想 / 装得下多少 / 发给谁」 ──
@@ -1224,7 +1290,6 @@ export function Composer({
         <Menu
           label={t('composer.mode.label')}
           width={320}
-          panelClassName="rounded-xl bg-surface-input p-1 shadow-lg shadow-black/10"
           triggerClassName="rounded-full focus-visible:outline-2 focus-visible:outline-accent"
           trigger={
             <Pill accent={value.mode !== 'code'}>
@@ -1496,7 +1561,7 @@ function ConversationUsage({ usage, sessionId }: { usage: ConversationUsageSumma
             role="group"
             tabIndex={0}
             aria-label={`${metric.label}: ${metric.exact}`}
-            className="inline-flex cursor-help items-center gap-1 whitespace-nowrap rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="inline-flex cursor-help items-center gap-1 whitespace-nowrap rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-fg-faint/50"
           >
             <span aria-hidden="true" className="text-fg-muted">{metric.icon}</span>
             <span>{metric.value}</span>
@@ -1508,6 +1573,15 @@ function ConversationUsage({ usage, sessionId }: { usage: ConversationUsageSumma
 }
 
 /** 输入框菜单的操作与开关共用一行布局，开关保持菜单展开以便连续调整。 */
+/** 灰字旁边那枚 `Tab` 键帽 —— 用户普遍不知道灰字能按 Tab 接受,接受过几次之后收起 */
+function GhostKey(): ReactNode {
+  return (
+    <kbd className="inline-flex h-[16px] shrink-0 items-center rounded-[4px] border border-[var(--border-strong)] px-1 font-sans text-[10px] leading-none text-fg-faint">
+      Tab
+    </kbd>
+  );
+}
+
 function ComposerMenuItem({
   children,
   icon,
@@ -1630,7 +1704,7 @@ function ThinkingPill({
 }): ReactNode {
   const { t } = useI18n();
   const levels = modelThinkingLevels(model);
-  const config = model?.thinkingConfig;
+  const config = model === undefined ? undefined : effectiveModelThinking(model).thinkingConfig;
   const label = (level: ThinkingLevel): string =>
     t(
       config?.mode === "toggle" && level === "medium"
@@ -1882,6 +1956,7 @@ function ContextRing({
   onManageMcp?: () => void;
 }): ReactNode {
   const { t } = useI18n();
+  const pricingTable = usePricingTable();
   /*
     菜单的三个视图。压缩模型 / 压缩档位各自是一张候选表,塞进主面板会把这张
     「还装得下多少」的卡片撑成一屏下拉。
@@ -1917,11 +1992,11 @@ function ContextRing({
   const pricing =
     pricingModelId === undefined
       ? null
-      : findPricing(PRICING_SEED, model?.providerId ?? null, pricingModelId, Date.now());
+      : findPricing(pricingTable, model?.providerId ?? null, pricingModelId, Date.now());
   const surcharge =
     pricingModelId === undefined
       ? undefined
-      : longContextSurcharge(PRICING_SEED, model?.providerId ?? null, pricingModelId, Date.now());
+      : longContextSurcharge(pricingTable, model?.providerId ?? null, pricingModelId, Date.now());
   const protocolLabel = formatContextWindow(effectiveContextWindow(protocolWindow, true));  const maxContextHint = !canMax
     ? t("composer.maxContextUnavailable", { window: protocolLabel })
     : surcharge !== undefined
@@ -2321,10 +2396,10 @@ function ContextBreakdown({
           /*
             ★ 这一行才是整张卡的由头:下面六行是「占掉的那些是什么」(分母是已用量),
             这一行是「还没开口就已经占掉多少窗口」(分母是窗口)。两个分母不一样,
-            所以它在线上面、措辞也不同 —— 混进去会让人把 42% 读成 42% 的窗口。
+            所以它单独放在明细之前、措辞也不同 —— 混进去会让人把 42% 读成 42% 的窗口。
           */
           <div
-            className="mb-1.5 flex items-center gap-2 border-b border-border pb-1.5"
+            className="mb-2 flex items-center gap-2 pb-1.5"
             title={t("composer.contextPreviewNote")}
           >
             <span className="min-w-0 flex-1 truncate text-fg-muted">
@@ -2377,11 +2452,11 @@ function ContextBreakdown({
         })}
         {cacheHitRate !== undefined && (
           /*
-            ★ 它和上面六行**不是一件事**,所以隔一条线:上面说的是「窗口被谁占了」,
+            ★ 它和上面六行**不是一件事**,所以用留白分组:上面说的是「窗口被谁占了」,
             这一行说的是「这些 token 里有多少是从缓存读的」(便宜那部分)。
             并排列进去会让人以为缓存也是六档里的一档。
           */
-          <div className="mt-1 flex items-center gap-2 border-t border-border pt-1.5">
+          <div className="mt-2 flex items-center gap-2 pt-1.5">
             <span className="min-w-0 flex-1 truncate text-fg-muted">
               {t("composer.contextCacheHit")}
             </span>

@@ -28,7 +28,7 @@ import type { ClientAuthState } from '../../../shared/domain/client-auth'
 // 只借类型:`settings/nav.ts` 是纯数据(零 React 依赖),这里不会把设置页拽进侧边栏的 bundle
 import type { SettingsPageId } from '../settings/nav'
 import { Mark } from '../components/brand/Mark'
-import { EmptyState } from '../components/ui/EmptyState'
+import { EmptyState } from '../components/arc/empty-state/empty-state'
 import { IconButton } from '../components/ui/IconButton'
 import { cn } from '../lib/cn'
 import { IS_MAC } from '../lib/platform'
@@ -37,11 +37,13 @@ import { FEATURE_ICON, MENU_ICON } from './icons'
 import { useI18n, type Translate } from '../i18n'
 import { ContextMenu, type ContextMenuPosition } from '../components/ui/ContextMenu'
 import { AccountMenu } from './AccountMenu'
+import { DeviceSwitcher } from './DeviceSwitcher'
 import { Dialog } from '../components/ui/Dialog'
-import { Button } from '../components/ui/Button'
+import { Button } from '../components/arc/button/button'
 import { duplicateSession, renameSession, setArchived, setFavorited } from '../services/sessions'
 import { copyText, openSessionWindow } from '../services/app'
 import { Spinner } from '../components/ui/Spinner'
+import { useAttentionSessionIds } from '../stores/session'
 import { toast } from '../stores/toast'
 import { usePluginsStore } from '../stores/plugins'
 import { openPluginWebApp } from '../services/plugins'
@@ -214,7 +216,7 @@ export function Sidebar({
           <EmptyState
             icon={<MessageSquarePlus size={22} />}
             title={t('workspace.none')}
-            hint={t('workspace.noneHint')}
+            description={t('workspace.noneHint')}
           />
         ) : (
           <>
@@ -230,7 +232,7 @@ export function Sidebar({
             >
               {sessions.filter((s) => !s.archived).length === 0 &&
               chatTabs.every((tab) => tab.kind !== 'chat' || sessions.some((s) => s.id === tab.ref.sessionId && s.archived)) ? (
-                <EmptyState title={t('workspace.noChats')} className="py-6" />
+                <EmptyState title={t('workspace.noChats')} description="" className="py-6" />
               ) : (
                 <ul className="flex flex-col gap-0.5 pb-1">
                   <SessionGroupList
@@ -252,7 +254,7 @@ export function Sidebar({
             <Section title={t('workspace.archived')} defaultOpen={false}
               revealSessionId={focusMode && sessions.some((session) => session.archived && session.id === activeSessionId) ? activeSessionId : null}>
               {sessions.filter((s) => s.archived).length === 0 ? (
-                <EmptyState title={t('workspace.noArchived')} className="py-6" />
+                <EmptyState title={t('workspace.noArchived')} description="" className="py-6" />
               ) : (
                 <ul className="flex flex-col gap-0.5 pb-1">
                   {sessions.filter((s) => s.archived).map((s) => (
@@ -289,6 +291,7 @@ export function Sidebar({
       {!focusMode && (
         <div className="mx-1.5 mb-1.5 flex shrink-0 items-center gap-1">
           <AccountMenu auth={auth} onOpenSettings={onOpenSettings} />
+          <DeviceSwitcher onOpenSettings={onOpenSettings} />
           <IconButton label={t('common.settings')} onClick={() => onOpenSettings()}>
             <Settings size={15} />
           </IconButton>
@@ -498,6 +501,8 @@ function SessionGroupBlock({
   workspaceId: string
 }): ReactNode {
   const [open, setOpen] = useState(defaultOpen || revealActive)
+  // 没在看的会话停下来等审批 / 等回答:应用内标一下,不强制切过去
+  const attentionSessionIds = useAttentionSessionIds()
   useEffect(() => {
     if (revealActive) setOpen(true)
   }, [activeSessionId, revealActive])
@@ -543,7 +548,7 @@ function SessionGroupBlock({
                     setMenu({ session, position: { x: event.clientX, y: event.clientY } })
                   }}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
+                    'flex w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
                     active ? 'bg-canvas text-fg' : 'text-fg-muted hover:bg-tint-hover hover:text-fg'
                   )}
                 >
@@ -560,7 +565,9 @@ function SessionGroupBlock({
                         侧边栏这一行还在转圈,直到用户恰好改了某条会话(改名/归档)才消。
                         一个事实只有一处真源(§9),那一处就是运行中索引。
                       */}
-                  {runningSessionIds.has(session.id) && (
+                  {attentionSessionIds.has(session.id) ? (
+                    <span title={t('chat.pendingInteraction')} aria-label={t('chat.pendingInteraction')} className="size-1.5 shrink-0 rounded-full bg-warning" />
+                  ) : runningSessionIds.has(session.id) && (
                     <Spinner size="xs" label={t('chat.taskChecklistRunning')} className="text-accent" />
                   )}
                   {session.favorited && <span className="shrink-0 text-accent">★</span>}
@@ -640,7 +647,7 @@ function SessionGroupBlock({
         onClose={() => setRunningBlocked(false)}
         title={t('session.deleteRunningTitle')}
         width={420}
-        footer={<Button size="sm" variant="accent" onClick={() => setRunningBlocked(false)}>{t('common.close')}</Button>}
+        footer={<Button type="button" size="sm" variant="primary" onClick={() => setRunningBlocked(false)}>{t('common.close')}</Button>}
       >
         <p className="text-[12.5px] text-fg-muted">{t('session.deleteRunningMessage')}</p>
       </Dialog>
@@ -651,8 +658,8 @@ function SessionGroupBlock({
         width={420}
         footer={
           <>
-            <Button size="sm" onClick={() => setDialog(null)}>{t('common.cancel')}</Button>
-            <Button size="sm" variant="accent" disabled={renameDraft.trim().length === 0} onClick={() => {
+            <Button variant="secondary" type="button" size="sm" onClick={() => setDialog(null)}>{t('common.cancel')}</Button>
+            <Button type="button" size="sm" variant="primary" disabled={renameDraft.trim().length === 0} onClick={() => {
               if (dialog?.kind !== 'rename') return
               void run(() => renameSession(dialog.session.id, renameDraft)).then(() => setDialog(null))
             }}>{t('common.save')}</Button>
@@ -660,14 +667,14 @@ function SessionGroupBlock({
         }
       >
         <label className="block text-[12px] text-fg-muted" htmlFor="session-rename-input">{t('session.renamePrompt')}</label>
-        <input id="session-rename-input" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} className="selectable mt-2 h-9 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-accent" />
+        <input id="session-rename-input" autoFocus value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} className="apple-field selectable mt-2 h-9 w-full rounded-[8px] border border-border bg-surface-field px-2.5 text-[13px] text-fg outline-none focus:border-fg-faint" />
       </Dialog>
     </li>
   )
 }
 
 function MenuAction({ icon, label, danger = false, onSelect }: { icon: ReactNode; label: string; danger?: boolean; onSelect: () => void }): ReactNode {
-  return <button type="button" role="menuitem" onClick={onSelect} className={cn('flex w-full items-center gap-2.5 rounded-[7px] px-2.5 py-[7px] text-left text-[13px] transition-colors hover:bg-tint-strong', danger ? 'text-danger' : 'text-fg')}><span className={danger ? 'text-danger' : 'text-accent-soft'}>{icon}</span><span className="truncate">{label}</span></button>
+  return <button type="button" role="menuitem" onClick={onSelect} className={cn('flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-[7px] text-left text-[13px] transition-colors hover:bg-tint-strong', danger ? 'text-danger' : 'text-fg')}><span className={danger ? 'text-danger' : 'text-accent-soft'}>{icon}</span><span className="truncate">{label}</span></button>
 }
 
 /**
@@ -715,7 +722,7 @@ function ArchivedSessionItem({
           setMenu({ x: event.clientX, y: event.clientY })
         }}
         aria-current={active ? 'page' : undefined}
-        className={cn('flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
+        className={cn('flex w-full items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
           active ? 'bg-canvas text-fg' : 'text-fg-muted hover:bg-tint-hover hover:text-fg')}
       >
         <span className="min-w-0 flex-1 truncate">{session.title}</span>
@@ -771,7 +778,7 @@ function ArchivedSessionItem({
         onClose={() => setRunningBlocked(false)}
         title={t('session.deleteRunningTitle')}
         width={420}
-        footer={<Button size="sm" variant="accent" onClick={() => setRunningBlocked(false)}>{t('common.close')}</Button>}
+        footer={<Button type="button" size="sm" variant="primary" onClick={() => setRunningBlocked(false)}>{t('common.close')}</Button>}
       >
         <p className="text-[12.5px] text-fg-muted">{t('session.deleteRunningMessage')}</p>
       </Dialog>

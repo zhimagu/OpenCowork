@@ -3,9 +3,10 @@ import {
   PERMISSION_MODES,
   type PermissionMode
 } from '../../../../shared/agent/permission'
-import { Segmented } from '../../components/ui/Segmented'
+import { canDisableThinking } from '../../../../shared/domain/model-runtime'
+import SegmentedControl from '../../components/arc/segmented-control/segmented-control'
 import { Slider } from '../../components/ui/Slider'
-import { Toggle } from '../../components/ui/Toggle'
+import { Switch } from '../../components/arc/switch/switch'
 import { Select } from '../../components/ui/Select'
 import { RoleModelPicker } from '../../components/RoleModelPicker'
 import { useChatModelGuard } from '../../components/useChatModelGuard'
@@ -66,6 +67,15 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
       patch({ goalEvaluatorModel: model, goalEvaluatorModelProviderId: modelProviderId })
     }
   )
+  /*
+    续写模型关不掉思考 = 续写永远不会出现(`inline-completion.ts` 直接不发)。
+    选中的那一刻就说出来,而不是让用户对着一个「开着却从不出灰字」的开关发愣。
+  */
+  const inlineAlias = settings.inlineCompletionModel === ''
+    ? undefined
+    : models.find((m) => m.alias === settings.inlineCompletionModel
+      && (settings.inlineCompletionModelProviderId === undefined || m.providerId === settings.inlineCompletionModelProviderId))
+  const inlineModelThinks = inlineAlias !== undefined && !canDisableThinking(inlineAlias)
   if (sub === 'agent') {
     // 一条绑定一个选项 —— 同一别名挂在多家上时,「用哪一家审核」是用户要选的东西
     const reviewerOptions = [
@@ -158,11 +168,11 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
           }
           wide
         >
-          <Segmented<PermissionMode>
+          <SegmentedControl
             label={t('general.defaultPermission')}
             value={settings.defaultPermissionMode}
             options={PERMISSION_MODES.map((m) => ({ value: m, label: t(`permission.${m}` as 'permission.ask' | 'permission.auto' | 'permission.full') }))}
-            onChange={(defaultPermissionMode) => patch({ defaultPermissionMode })}
+            onValueChange={(defaultPermissionMode) => patch({ defaultPermissionMode: defaultPermissionMode as PermissionMode })}
           />
         </SettingRow>
         <SettingRow
@@ -218,8 +228,8 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
           />
         </SettingRow>
         <SettingRow title={t('general.autoCompact')} description={t('general.autoCompactHint')}>
-          <Toggle label={t('general.autoCompact')} checked={settings.contextManagement.autoCompact}
-            onChange={(autoCompact) => patch({ contextManagement: { autoCompact } })} />
+          <Switch aria-label={t('general.autoCompact')} checked={settings.contextManagement.autoCompact}
+            onCheckedChange={(autoCompact) => patch({ contextManagement: { autoCompact } })} />
         </SettingRow>
         {/*
           需求:压缩可以交给另一个模型(它是一次长输入、短输出的机械活)。空值 =
@@ -257,6 +267,60 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
             }}
           />
         </SettingRow>
+        {/*
+          输入框补全(灰字 + Tab 接受),设计见 docs/composer-autocomplete.md。
+          ★ 三层各有各的开关,因为它们的代价完全不同:建议下一步每轮一次请求(出厂开)、
+            本地补全零请求(出厂开)、打字续写每次停顿一次请求(出厂关、必须点名模型)。
+        */}
+        <SettingRow title={t('settings.completion.suggestions')} description={t('settings.completion.suggestionsHint')}>
+          <Switch aria-label={t('settings.completion.suggestions')} checked={settings.promptSuggestions}
+            onCheckedChange={(promptSuggestions) => patch({ promptSuggestions })} />
+        </SettingRow>
+        {settings.promptSuggestions && (
+          <SettingRow title={t('settings.completion.model')} description={t('settings.completion.modelHint')} wide>
+            <RoleModelPicker
+              label={t('settings.completion.model')}
+              models={models}
+              providers={providers}
+              loaded={loaded}
+              model={settings.completionModel}
+              modelProviderId={settings.completionModelProviderId}
+              onChange={(model, modelProviderId) => {
+                patch({ completionModel: model, completionModelProviderId: modelProviderId })
+              }}
+            />
+          </SettingRow>
+        )}
+        <SettingRow title={t('settings.completion.local')} description={t('settings.completion.localHint')}>
+          <Switch aria-label={t('settings.completion.local')} checked={settings.localCompletion}
+            onCheckedChange={(localCompletion) => patch({ localCompletion })} />
+        </SettingRow>
+        <SettingRow title={t('settings.completion.inline')} description={t('settings.completion.inlineHint')}>
+          <Switch aria-label={t('settings.completion.inline')} checked={settings.inlineCompletion}
+            onCheckedChange={(inlineCompletion) => patch({ inlineCompletion })} />
+        </SettingRow>
+        {settings.inlineCompletion && (
+          <SettingRow
+            title={t('settings.completion.inlineModel')}
+            description={inlineModelThinks
+              ? <span className="text-danger">{t('settings.completion.inlineModelThinking')}</span>
+              : t('settings.completion.inlineModelHint')}
+            wide
+          >
+            <RoleModelPicker
+              label={t('settings.completion.inlineModel')}
+              models={models}
+              providers={providers}
+              loaded={loaded}
+              model={settings.inlineCompletionModel}
+              modelProviderId={settings.inlineCompletionModelProviderId}
+              emptyLabel={t('settings.completion.inlineModelNone')}
+              onChange={(model, modelProviderId) => {
+                patch({ inlineCompletionModel: model, inlineCompletionModelProviderId: modelProviderId })
+              }}
+            />
+          </SettingRow>
+        )}
         <SettingRow
           title={t('general.maxOutputTokens')}
           description={t('general.maxOutputTokensHint', {
@@ -336,14 +400,14 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
           wide
           last
         >
-          <Segmented<AppLocale>
+          <SegmentedControl
             label={t('settings.language')}
             value={settings.locale}
             options={[
               { value: 'zh-CN', label: t('settings.simplifiedChinese') },
               { value: 'en-US', label: t('settings.english') }
             ]}
-            onChange={(locale) => patch({ locale })}
+            onValueChange={(locale) => patch({ locale: locale as AppLocale })}
           />
         </SettingRow>
       </SettingGroup>
@@ -360,24 +424,24 @@ export function GeneralPage({ settings, sub, patch }: SettingsPageProps): ReactN
 
       <SettingGroup title={t('settings.sounds')}>
         <SettingRow title={t('settings.taskCompleteSound')} description={t('settings.taskCompleteSoundHint')}>
-          <Toggle
-            label={t('settings.taskCompleteSound')}
+          <Switch
+            aria-label={t('settings.taskCompleteSound')}
             checked={settings.notifications.taskComplete}
-            onChange={(taskComplete) => patch({ notifications: { taskComplete } })}
+            onCheckedChange={(taskComplete) => patch({ notifications: { taskComplete } })}
           />
         </SettingRow>
         <SettingRow title={t('settings.permissionSound')} description={t('settings.permissionSoundHint')}>
-          <Toggle
-            label={t('settings.permissionSound')}
+          <Switch
+            aria-label={t('settings.permissionSound')}
             checked={settings.notifications.permissionApproval}
-            onChange={(permissionApproval) => patch({ notifications: { permissionApproval } })}
+            onCheckedChange={(permissionApproval) => patch({ notifications: { permissionApproval } })}
           />
         </SettingRow>
         <SettingRow title={t('settings.planSound')} description={t('settings.planSoundHint')} last>
-          <Toggle
-            label={t('settings.planSound')}
+          <Switch
+            aria-label={t('settings.planSound')}
             checked={settings.notifications.planApproval}
-            onChange={(planApproval) => patch({ notifications: { planApproval } })}
+            onCheckedChange={(planApproval) => patch({ notifications: { planApproval } })}
           />
         </SettingRow>
       </SettingGroup>

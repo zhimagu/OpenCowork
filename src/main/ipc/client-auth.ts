@@ -1,8 +1,9 @@
-import { shell } from 'electron'
+import { openExternalUrl } from '../services/external-opener'
 import { createServer, type Server } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import type { ClientAuthState, ClientAuthUser, ClientTeamOption, ClientUsageEntry } from '../../shared/domain/client-auth'
 import { getHost } from '../runtime'
+import { listResolvedModels } from '../state/model-bindings'
 import { store } from '../state/store'
 import * as repo from '../db/repo'
 import { windows } from '../window/registry'
@@ -262,7 +263,7 @@ function repairLegacyClientAliases(): void {
   if (legacy.length === 0) return
   const resolver = modelBindingResolver(store.listUserModelCatalog())
   for (const alias of legacy) store.putAlias(resolver.resolve({ ...alias, catalogOverrides: [] }))
-  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: store.listAliases() })
+  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: listResolvedModels() })
 }
 
 /**
@@ -292,7 +293,7 @@ function backfillAnthropicOverride(): void {
   )
   if (targets.length === 0) return
   for (const alias of targets) store.putAlias({ ...alias, protocolOverride: 'anthropic' })
-  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: store.listAliases() })
+  windows.emitToAll('provider:changed', { providers: store.listProviders(), models: listResolvedModels() })
 }
 
 /**
@@ -365,7 +366,7 @@ async function syncClientModels(access: string): Promise<void> {
         catalogOverrides: [], enabled: true
       }))
     })
-    windows.emitToAll('provider:changed', { providers: store.listProviders(), models: store.listAliases() })
+    windows.emitToAll('provider:changed', { providers: store.listProviders(), models: listResolvedModels() })
   } catch { /* model sync is best effort; user can retry from the model page */ }
 }
 
@@ -593,7 +594,7 @@ export async function startClientLogin(): Promise<ClientAuthState> {
         ★★ 改这一串之后**必须重新登录**,刷新 token 不会补上新 scope。
       */
       authorize.searchParams.set('scope', 'profile:read wallet:read usage:read models:read inference:write config:read config:write config:secret:read config:secret:write skills:read skills:install plugins:read plugins:install')
-      void shell.openExternal(authorize.toString()).catch(fail)
+      void openExternalUrl(authorize.toString()).catch(fail)
     })
   })
   const response = await getHost().fetch(`${API_ROOT}/api/client/oauth/token`, {

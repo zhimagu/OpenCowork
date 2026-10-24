@@ -17,7 +17,10 @@ import {
   peekThemePreference
 } from './db'
 import { probeSqlite, type SqliteProbeResult } from './db/probe'
-import { electronHost, migrateLegacyCredentials } from './host'
+import { electronHost, migrateLegacyCredentials, migrateProvidersToFile } from './host'
+import { PROVIDER_FILE_NAME, ProviderFileStore } from './db/provider-file'
+import { useProviderFileStore } from './db/repo'
+import { onProviderFileChanged } from './ipc/provider'
 import { installProductionBrowserBindings, type BrowserBindings } from './browser/bindings'
 import {
   flushPendingPersists,
@@ -25,15 +28,28 @@ import {
   reconcileMigratedWorkspacesForStoredAccount,
   registerIpc,
   registerMigrationIpc,
+  setWindowContentVisible,
   shutdownClientAuth,
   shutdownRuns,
   shutdownTerminals
 } from './ipc'
 import { sweepPendingDelete } from './ipc/pending-delete'
+import { closeDeviceManager } from './ipc/device'
 import { shutdownImports } from './imports/service'
 import { resumeImportSync, startImportSync, stopImportSync } from './imports/sync'
 import { resumeUsageRollup, startUsageRollup, stopUsageRollup } from './usage/rollup-task'
 import { installAttachmentProtocol, registerAttachmentScheme } from './net/attachment-protocol'
+import { installWindowBackend } from './window/registry'
+import { installExternalOpener } from './services/external-opener'
+import { installClientAuthPort } from './services/client-auth-port'
+import { getClientAccessToken, getClientAuthState } from './ipc/client-auth'
+
+// 窗口注册表本身不导入 Electron(无头服务要复用);桌面在这里把真实的 BrowserWindow 接进去。
+installWindowBackend(BrowserWindow)
+// 登录流程要打开系统浏览器:同样由桌面入口注入,服务里没有这个能力时会明确失败。
+installExternalOpener((url) => shell.openExternal(url))
+// 技能市场安装要平台访问令牌:登录服务由桌面注入,无头服务不装 = 未登录。
+installClientAuthPort({ authenticated: () => getClientAuthState().mode === 'authenticated', accessToken: getClientAccessToken })
 import { installWidgetProtocol, registerWidgetScheme } from './net/widget-protocol'
 import { installPluginProtocol, registerPluginScheme, setPluginAppearanceResolver } from './plugin/protocol'
 import { shutdownPlugins, startPlugins, acquireDocumentGuard } from './ipc/plugins'
@@ -276,7 +292,7 @@ function createMainWindow(
     /*
       ★ **跟着用户的主题偏好走,不能写死。** 这个色是窗口在渲染层画出第一帧之前
       露出来的底色 —— 写死深色的话,浅色用户看到的是「深色空块 → 界面出来 → 啪一下
-      变浅」。两个值取自 theme.css 里的 `--color-app`(深 #2a2d2b / 浅 #f2eee6),
+      变浅」。两个值取自 theme.css 里的 `--color-app`(深 #252527 / 浅 #ececf0),
       改那边记得同步这里。
 
       ★ **不能用 `store.getSettings()`。** 建窗现在排在启动迁移闸门之前,而闸门
@@ -284,7 +300,16 @@ function createMainWindow(
       随后真正的 `openDatabase()` 直接抛错,启动死在那里。
       `peekThemePreference()` 自己开一个只读连接,不碰那个句柄。
     */
-    backgroundColor: resolveTheme(peekThemePreference(join(resolveDataRoot(), DB_FILENAME))) === 'light' ? '#f2eee6' : '#2a2d2b',
+    backgroundColor: resolveTheme(peekThemePreference(join(resolveDataRoot(), DB_FILENAME))) === 'light' ? '#ececf0' : '#252527',
+    /*
+      ★ 苹果风格(Liquid Glass):macOS 上窗口本身是毛玻璃,桌面壁纸透过来 ——
+      渲染层在 `data-vibrancy` 下把窗口底和两块主面板改成半透明(见 theme.css 末尾)。
+      vibrancy 只有在背景色全透明时才看得见,所以这里把上面那个底色覆盖掉;
+      首帧不会闪,因为系统材质本身就跟随深浅外观。Windows/Linux 保持实色。
+    */
+    ...(process.platform === 'darwin'
+      ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const, backgroundColor: '#00000000' }
+      : {}),
     // Windows/Linux 的任务栏与窗口图标(macOS 忽略,那边走下面的 app.dock.setIcon)
     icon: nativeImage.createFromPath(appIconPath),
     // macOS:红绿灯嵌进侧边栏(方案 §8)。Windows/Linux:只去掉系统标题栏,
@@ -305,6 +330,18 @@ function createMainWindow(
   })
 
   win.on('ready-to-show', () => win.show())
+
+  /*
+    需求:藏起来的窗口(最小化、点关闭按钮隐藏到托盘)不再接收、也不再累积任何 run 正文 ——
+    Agent 照常在主进程跑,窗口回来时按快照 + 历史重建它在看的会话。
+    ★ 失焦**不算**:副屏上还开着的窗口仍然要看见新内容。
+  */
+  const contentHidden = (): void => setWindowContentVisible(win.webContents, false)
+  const contentShown = (): void => setWindowContentVisible(win.webContents, true)
+  win.on('minimize', contentHidden)
+  win.on('hide', contentHidden)
+  win.on('restore', contentShown)
+  win.on('show', contentShown)
 
   /*
     关闭按钮只隐藏,不销毁窗口 —— 保留页面状态(当前会话/滚动位置/未保存的输入),
@@ -332,6 +369,7 @@ function createMainWindow(
   */
   win.webContents.on('will-prevent-unload', () => {
     quitFlow?.veto()
+    updateService.installCancelled()
     /*
       需求:整次退出作废 = 应用必须**完全可用**,文档也要照常打得开。
       `veto()` 只管退出状态机,文档闸门在别处(主进程的 `acquireDocumentGuard()`,
@@ -753,6 +791,33 @@ void app
       `[credentials] 旧密文迁移完成:成功 ${credentialMigration.migrated},保留 ${credentialMigration.failed}`
     )
   }
+  /*
+    ★ 用户添加的供应商 / 别名 / 密钥放进 `~/.next-cowork/providers.json`(见 `db/provider-file.ts`)。
+    必须在 `initRuntime` 之前装上 —— `seed()` 要靠它判断「文件模式下不种内置上游」。
+    迁移失败(整库快照做不了、文件损坏…)**不装文件模式**,继续按库运行:
+    宁可这次启动用旧路径,也不能让库里的供应商在界面上凭空消失。
+  */
+  const providerFile = new ProviderFileStore(join(resolveProfileRoot(), PROVIDER_FILE_NAME))
+  try {
+    const migration = migrateProvidersToFile(providerFile)
+    useProviderFileStore(providerFile)
+    providerFile.onExternalChange(() => onProviderFileChanged())
+    providerFile.startWatching()
+    if (migration.status === 'migrated') {
+      host.logger.info(
+        `[providers] 已迁移到 ${PROVIDER_FILE_NAME}:供应商 ${migration.providers},` +
+          `丢弃未配置的内置预设 ${migration.skippedBuiltin},密钥解不开 ${migration.keysFailed}`
+      )
+    }
+    for (const problem of providerFile.problems) {
+      host.logger.warn(`[providers] ${PROVIDER_FILE_NAME}${problem.providerId === undefined ? '' : ` / ${problem.providerId}`}: ${problem.message}`)
+    }
+    if (providerFile.error !== undefined) host.logger.warn(`[providers] ${providerFile.error}`)
+  } catch (error) {
+    host.logger.error(
+      `[providers] 迁移到 ${PROVIDER_FILE_NAME} 失败,本次启动仍使用数据库:${error instanceof Error ? error.message : String(error)}`
+    )
+  }
   const bundledSkillsRoot = app.isPackaged
     ? join(process.resourcesPath, SKILLS_DIR)
     : join(app.getAppPath(), 'resources', SKILLS_DIR)
@@ -821,6 +886,11 @@ void app
     或者在闸门举着的情况下抛在收尾里被吞掉。
   */
   setQuitRequester(() => { requestQuit() })
+  // 「重启更新」也走同一条退出流程;安装本身在收尾最后一步(见 QuitFlow 的 `quit`)。
+  updateService.setQuitRequester(async () => {
+    await documentQuitGuard.request().catch((error: unknown) => { console.error('[quit] 退出前的文档预检失败:', error) })
+    return quitFlow?.inProgress === true || quitFlow?.done === true
+  })
   registerIpc()
   /*
     ★ **紧接着调,不能往后挪、更不能省。** 建窗在 `registerIpc()` 之前,所以此刻
@@ -988,6 +1058,7 @@ quitFlow = new QuitFlow({
     shutdownRuns()
     shutdownSessionTitles()
     shutdownTerminals()
+    closeDeviceManager()
   },
   drainAsync: () =>
     Promise.allSettled([
@@ -1008,7 +1079,8 @@ quitFlow = new QuitFlow({
     ]),
   destroyTray,
   sealDatabase: () => closeDatabase({ final: true }),
-  quit: () => app.quit(),
+  // 窗口已销毁、库已封:有待装的更新就在这里交给安装器,否则普通退出。
+  quit: () => { if (!updateService.quitAndInstallIfPending()) app.quit() },
   exit: (code) => app.exit(code)
 })
 

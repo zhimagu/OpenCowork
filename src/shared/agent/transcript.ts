@@ -67,6 +67,10 @@ export interface ToolCallState {
    * 第 3 格先到时它必须出现在第 3 格,而不是挤到第 1 格让后面的占位整体错位。
    */
   partialImages?: Readonly<Record<number, import('./message').ToolOutputImage>>
+  /** 运行中能被转去后台(见 `ToolProgress.detachable`)。易失,`tool_end` 时清掉。 */
+  detachable?: boolean
+  /** `Workflow` 运行中的节点状态(见 `ToolProgress.workflow`)。易失,`tool_end` 时清掉。 */
+  workflow?: import('./workflow').WorkflowState
   output?: ToolOutput
   /**
    * `tool_start` 到达时的墙钟毫秒。
@@ -367,7 +371,8 @@ function writeSubagentResult(subagents: TranscriptState['subagents'], part: Extr
     ...(metadata.summary === undefined ? {} : { summary: metadata.summary }),
     ...(metadata.error === undefined ? {} : { error: metadata.error }),
     ...(metadata.reportStatus === undefined
-      ? (metadata.background === true && status === 'done' ? { reportStatus: 'pending' as const } : {})
+      ? (metadata.background === true && status === 'done' && previous?.reportStatus === undefined
+          ? { reportStatus: 'pending' as const } : {})
       : { reportStatus: metadata.reportStatus })
   }
 }
@@ -657,7 +662,11 @@ export function applyEvent(s: TranscriptState, e: AgentEvent): TranscriptState {
             // 逐张到达的生图结果按格子序号**累加**(每条进度只带新到的那一张)
             ...(e.progress.image === undefined
               ? {}
-              : { partialImages: { ...prev.partialImages, [e.progress.image.index]: e.progress.image.image } })
+              : { partialImages: { ...prev.partialImages, [e.progress.image.index]: e.progress.image.image } }),
+            // 同 `card`:推了就以这一条为准,没推则保留上一条的说法
+            ...(e.progress.detachable === undefined ? {} : { detachable: e.progress.detachable }),
+            // 整份快照,推了就替换(见 shared/agent/workflow.ts 文件头)
+            ...(e.progress.workflow === undefined ? {} : { workflow: e.progress.workflow })
           }
         }
       }
@@ -685,6 +694,9 @@ export function applyEvent(s: TranscriptState, e: AgentEvent): TranscriptState {
             card: undefined,
             // 过程态的逐张图同理:结束后以 output.images 为准,不留两份
             partialImages: undefined,
+            detachable: undefined,
+            // 结束后以 output.workflow 为准
+            workflow: undefined,
             endedAt: e.at ?? Date.now()
           }
         }
@@ -717,7 +729,8 @@ export function applyEvent(s: TranscriptState, e: AgentEvent): TranscriptState {
       return { ...rest, contextStatus: e.status }
     }
 
-    case 'subagent_start':
+    case 'subagent_start': {
+      const previous = s.subagents[e.callId]
       return {
         ...s,
         subagents: {
@@ -736,10 +749,13 @@ export function applyEvent(s: TranscriptState, e: AgentEvent): TranscriptState {
             toolCalls: 0,
             toolErrors: 0,
             lastEventAt: e.at ?? Date.now(),
-            ...(e.at === undefined ? {} : { startedAt: e.at })
+            ...(e.at === undefined ? {} : { startedAt: e.at }),
+            ...(previous?.childRunId === e.childRunId && previous.reportStatus !== undefined
+              ? { reportStatus: previous.reportStatus } : {})
           }
         }
       }
+    }
 
     case 'subagent_update': {
       const previous = s.subagents[e.callId]
@@ -807,7 +823,9 @@ export function applyEvent(s: TranscriptState, e: AgentEvent): TranscriptState {
             ...(e.error === undefined ? {} : { error: e.error }),
             ...(e.childSeq === undefined ? {} : { childSeq: e.childSeq }),
             ...(e.at === undefined ? {} : { endedAt: e.at }),
-            ...(previous.background === true ? { reportStatus: 'pending' as const } : {})
+            // 回传状态由主进程确认;迟到的结束事件不能把 injecting/reported 打回 pending。
+            ...(previous.background === true && previous.reportStatus === undefined
+              ? { reportStatus: 'pending' as const } : {})
           }
         }
       }

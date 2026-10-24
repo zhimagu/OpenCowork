@@ -18,6 +18,10 @@ Zhimagu CoWork brings agent-driven development to the desktop: multiple workspac
 - **Plugins** — a manifest-driven plugin system with per-call capability gates. Plugins can contribute commands, menus, keybindings, custom editors, views, web apps, agent tools and bundled skills.
 - **Native experience** — light/dark themes, accent colors, motion-level control, auto-update, and full Simplified Chinese / English localization.
 
+## Model access
+
+Sign in with your NextCoWork account to use the built-in model channel. Create an account at <https://nextco.work>, then sign in from the first-run welcome screen or from **Settings → Account** — authorization completes in your browser. Once signed in, the **NextCoWork** provider is added for you (base URL `https://nextco.work/v1`, OpenAI Responses by default) and your model list syncs on first sign-in; refresh it any time with **Fetch model list from provider** on the Models page. Usage is metered against your wallet balance, shown on the same Account page. Prefer a provider of your own — OpenAI, Anthropic, DeepSeek, a local gateway? Add it in **Settings → Models** with your own key.
+
 ## Download
 
 Installers are published for:
@@ -27,6 +31,18 @@ Installers are published for:
 - Linux (`.AppImage`)
 
 Visit <https://nextco.work> for the latest stable release.
+
+## Run a device service
+
+The agent does not have to run inside the app. A headless device service (no Electron, Node.js 24+) can hold the database, the workspaces, Git and the terminals on another machine and keep running while the desktop is closed; the desktop pairs with it over a certificate-pinned connection.
+
+```bash
+npm i -g @aidotnet/nextcowork-device-service
+ncw-device-service diagnose
+ncw-device-service --data-dir ~/ncw-device --host 0.0.0.0 --port 7801 --pairing-port 7800 --advertise nas.lan --invite
+```
+
+Paste the printed `ncwpair1.…` invitation into **Settings → Devices → Add device**, check the fingerprint, then pair. Installing it as a system service (systemd / LaunchDaemon / WinSW), taking over an existing desktop data root, and troubleshooting are covered in [docs/device-service.md](./docs/device-service.md).
 
 ## Development
 

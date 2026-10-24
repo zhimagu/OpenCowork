@@ -107,7 +107,7 @@
 
   /* ── 交互态 ── */
   --color-tint: #2c2c2e; /* 激活的内层 Tab(实测)/ 控件槽 / 用户气泡 */
-  --color-tint-hover: #323234; /* 悬停(推的:+11,带绿) */
+  --color-tint-hover: #323234; /* 悬停(推的:+11) */
   --color-tint-strong: #3a3a3c; /* 菜单行悬停 / 分类 chip(推的:+17) */
 
   --color-border: #48484a; /* 与 tint 同值 —— 沿用 v1.1.15 里两者相等的关系 */
@@ -137,8 +137,8 @@
   --color-fg-faint: #8e8e93;
 
   --color-icon: #c7c7cc; /* ★ 中性灰,**不是**强调色 —— 见上 §3。缩图下界 */
-  --color-accent: #0071e3; /* ★ 亮绿(激活芯片实心底 / 「完全访问」盾牌与文字) */
-  --color-accent-fg: #ffffff; /* 压在 accent 上的文字 —— 深绿近黑 */
+  --color-accent: #0071e3; /* ★ systemBlue 压深一档(选值理由见 theme.ts 的 BASE)—— 激活芯片实心底 / 「完全访问」盾牌与文字 */
+  --color-accent-fg: #ffffff; /* 压在 accent 上的文字 —— 纯白 */
   --color-accent-soft: #4a6c99; /* 正文里的装饰性小图标(推的:accent 去饱和) */
   --color-danger: #ff453a; /* 未量到,沿用 v1.1.15 */
   /*
@@ -154,7 +154,7 @@
       一个能被改成背景色的警告色等于没有警告色。danger 同理已经在表内,
       属于历史遗留,不在这次一并动。
 
-    色值取 accent 的补色方向(琥珀),在 canvas #1e2020 上对比度 ≈ 8.9:1。
+    色值取 accent 的补色方向(琥珀),在深色 canvas #1c1c1e 上对比度 ≈ 8.3:1(算的)。
   */
   --color-warning: #ff9f0a; /* systemOrange(深色) */
   --color-success: #30d158; /* systemGreen(深色)—— 状态药丸「成功」用 */
@@ -168,9 +168,8 @@
     模型时相邻两片只差十来个百分点,肉眼分不开 —— 图例上八个点全是同一个色。
 
     **这组值是推的,不是量的**:参考实现里没有分类色。取法是 8 个色相按
-    「相邻两项色相差尽量大」排序(蓝 → 琥珀 → 紫 → 青绿 → 珊瑚 → 青 → 粉 → 橄榄),
-    深色下统一抬到中高明度:8 色在 surface #232726 上对比度 5.4–8.1:1(算的,
-    WCAG 相对亮度公式),other 为 3.0:1。
+    「相邻两项色相差尽量大」排序(蓝 → 琥珀 → 紫 → 青绿 → 珊瑚 → 青 → 粉 → 黄,
+    全部取 macOS 系统色板),深色下统一抬到中高明度过非文本 3:1 线。
 
     ★ 它们**不进 `THEME_TOKENS`**,和 warning 同理:这是数据编码,不是品牌色 ——
     跟着换色器走的话,换一次 accent 可能把第 3 类和第 5 类换成同一个色,
@@ -246,12 +245,11 @@
 }
 
 /*
-  ── 浅色:量自 docs/image-new(三张)+ docs/image-latest/light.png(复量)──
+  ── 浅色:与深色同批换成 macOS 系统色(feat/apple-style-ui),权威值见 theme.ts 的 BASE ──
 
-  复量的结论是**浅色这版没动**:canvas #faf9f5、surface #f6f4ef、窗口底 #f2eee6、
-  chrome #e8e4dd、输入框 #ffffff、激活内层 Tab #efefec、正文 #181c19、
-  「完全访问」药丸底 #e8ebe9(= `bg-accent/10`,见上 §5)—— 八处和 docs/image-new 逐一对上。
-  所以这一版改的只有深色,浅色原样保留。
+  以下「量自 docs/image-new」「浅色这版没动」的说明描述的是墨绿时代,保留作历史;
+  苹果化后浅色同样整批换过(canvas #ffffff、侧边栏 #f5f5f7、chrome #e3e3e8),
+  与深色出自同一个 systemGray 轴。
 */
 :root[data-theme='light'] {
   --color-app: #ececf0; /* 窗口底 —— 面板之间的缝 */
@@ -276,7 +274,7 @@
   --color-fg-faint: #8e8e93;
 
   --color-icon: #6e6e73; /* ★ 中性灰,不是强调色 —— 见上 §3 */
-  --color-accent: #0071e3; /* ★ 墨绿 —— 深色是亮绿 #36d285,明暗相反 */
+  --color-accent: #0071e3; /* ★ systemBlue —— 与深色同值,不再随明暗反转(墨绿时代才是反的) */
   --color-accent-fg: #ffffff;
   --color-accent-soft: #86a8d6;
   --color-danger: #e0352b;
@@ -285,7 +283,7 @@
   --color-success: #248a3d; /* systemGreen 压暗到浅底可读 */
 
   /* 图表分类色:色相顺序同深色,明度压到中低档 —— 深色那套在近白底上
-     琥珀 / 橄榄远低于 3:1,色块边界会糊。这套在 surface #f6f4ef 上 3.3–4.9:1,
+     琥珀 / 黄远低于 3:1,色块边界会糊。这套在浅色 surface #f5f5f7 上
      过非文本 3:1 线(推的 + 算的,理由见 @theme 里那段) */
   --color-chart-1: #0071e3;
   --color-chart-2: #c46a00;
